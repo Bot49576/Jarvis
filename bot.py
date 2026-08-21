@@ -4,6 +4,8 @@ import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 import requests
+from ddgs import DDGS
+
 from telegram import Update
 from telegram.ext import (
     Application,
@@ -89,6 +91,24 @@ WISSEN UND EHRLICHKEIT:
 - Bei aktuellen Informationen sollst du möglichst auf verlässliche
   Quellen zurückgreifen.
 
+INTERNETRECHERCHE:
+
+- Du hast Zugriff auf eine Websuche.
+- Wenn Liam ausdrücklich sagt:
+  "recherchiere", "such im Internet", "suche online",
+  "finde heraus" oder Ähnliches, MUSST du die Websuche verwenden.
+- Verwende die Websuche auch bei Informationen, die offensichtlich
+  aktuell sein können, zum Beispiel Nachrichten, aktuelle Preise,
+  neue Produkte, aktuelle Softwareversionen oder Ereignisse.
+- Wenn eine Websuche durchgeführt wurde, unterscheide klar zwischen
+  Informationen aus den Suchergebnissen und deinem allgemeinen Wissen.
+- Behaupte niemals, eine Webseite gelesen zu haben, wenn sie nicht
+  tatsächlich in den Suchergebnissen enthalten war.
+- Wenn die Suche keine brauchbaren Ergebnisse liefert, sage das offen.
+- Erfinde niemals Suchergebnisse.
+- Bei aktuellen oder wichtigen Informationen bevorzuge mehrere
+  unabhängige Suchergebnisse, wenn möglich.
+
 PROBLEMLÖSUNG:
 
 Wenn Liam dir eine Aufgabe gibt:
@@ -97,8 +117,9 @@ Wenn Liam dir eine Aufgabe gibt:
 2. Prüfe, welche Informationen vorhanden sind.
 3. Erkenne fehlende Informationen.
 4. Entwickle einen sinnvollen Plan.
-5. Schlage eine bessere Lösung vor, wenn du eine erkennst.
-6. Gib nicht einfach irgendeine Antwort, nur um etwas zu sagen.
+5. Recherchiere, wenn aktuelle oder unbekannte Informationen benötigt werden.
+6. Schlage eine bessere Lösung vor, wenn du eine erkennst.
+7. Gib nicht einfach irgendeine Antwort, nur um etwas zu sagen.
 
 VORSCHLÄGE:
 
@@ -225,10 +246,193 @@ def start_web_server():
 
 
 # ============================================================
+# ENTSCHEIDEN, OB WEBRECHERCHE NÖTIG IST
+# ============================================================
+
+def soll_recherchieren(text):
+
+    text_lower = text.lower()
+
+    direkte_suchbegriffe = [
+        "recherchiere",
+        "recherche",
+        "such im internet",
+        "suche im internet",
+        "such online",
+        "suche online",
+        "google das",
+        "google bitte",
+        "finde heraus",
+        "schau im internet",
+        "schau online",
+        "prüf online",
+        "prüfe online",
+        "nachschauen",
+        "nachschau",
+    ]
+
+    aktuelle_begriffe = [
+        "heute",
+        "gerade",
+        "aktuell",
+        "aktuelle",
+        "aktuellste",
+        "neueste",
+        "neuesten",
+        "morgen",
+        "diese woche",
+        "diesen monat",
+        "2026",
+        "preis",
+        "preise",
+        "kostet aktuell",
+        "verfügbar",
+        "release",
+        "update",
+        "version",
+        "nachrichten",
+        "news",
+        "ereignis",
+    ]
+
+    for phrase in direkte_suchbegriffe:
+
+        if phrase in text_lower:
+            return True
+
+    for phrase in aktuelle_begriffe:
+
+        if phrase in text_lower:
+            return True
+
+    return False
+
+
+# ============================================================
+# INTERNET-SUCHE MIT DDGS
+# ============================================================
+
+def internet_suche(query):
+
+    print(
+        f"Websuche gestartet: {query}"
+    )
+
+    try:
+
+        results = list(
+            DDGS().text(
+                query,
+                region="de-de",
+                safesearch="moderate",
+                max_results=6,
+            )
+        )
+
+        if not results:
+
+            print(
+                "Websuche: Keine Ergebnisse."
+            )
+
+            return []
+
+        clean_results = []
+
+        for result in results:
+
+            title = result.get(
+                "title",
+                ""
+            )
+
+            url = result.get(
+                "href",
+                ""
+            )
+
+            body = result.get(
+                "body",
+                ""
+            )
+
+            if not title and not body:
+                continue
+
+            clean_results.append(
+                {
+                    "title": title,
+                    "url": url,
+                    "body": body,
+                }
+            )
+
+        print(
+            f"Websuche: "
+            f"{len(clean_results)} Ergebnisse gefunden."
+        )
+
+        return clean_results
+
+    except Exception as error:
+
+        print(
+            "Websuche Fehler: "
+            f"{type(error).__name__}: {error}"
+        )
+
+        return []
+
+
+# ============================================================
+# SUCHERGEBNISSE FÜR OPENROUTER AUFBEREITEN
+# ============================================================
+
+def suche_kontext_erstellen(results):
+
+    if not results:
+
+        return None
+
+    parts = []
+
+    for index, result in enumerate(results, start=1):
+
+        title = result.get(
+            "title",
+            "Ohne Titel"
+        )
+
+        url = result.get(
+            "url",
+            ""
+        )
+
+        body = result.get(
+            "body",
+            ""
+        )
+
+        parts.append(
+            f"""
+QUELLE {index}
+Titel: {title}
+URL: {url}
+Inhalt: {body}
+"""
+        )
+
+    return "\n".join(parts)
+
+
+# ============================================================
 # OPENROUTER - KI ANTWORT
 # ============================================================
 
-def frage_ki(user_text):
+def frage_ki(
+    user_text,
+    web_context=None,
+):
 
     headers = {
         "Authorization": f"Bearer {OPENROUTER_API_KEY}",
@@ -237,18 +441,49 @@ def frage_ki(user_text):
         "X-Title": "JARVIS Telegram Bot",
     }
 
-    data = {
-        "model": OPENROUTER_MODEL,
-        "messages": [
+    messages = [
+        {
+            "role": "system",
+            "content": SYSTEM_PROMPT,
+        }
+    ]
+
+    if web_context:
+
+        messages.append(
             {
                 "role": "system",
-                "content": SYSTEM_PROMPT,
-            },
-            {
-                "role": "user",
-                "content": user_text,
-            },
-        ],
+                "content": f"""
+JARVIS HAT EINE WEBRECHERCHE DURCHGEFÜHRT.
+
+Verwende die folgenden Suchergebnisse als Recherchematerial.
+
+WICHTIG:
+- Erfinde keine Informationen, die nicht durch die Ergebnisse
+  oder dein gesichertes Wissen gestützt werden.
+- Wenn die Ergebnisse widersprüchlich sind, erwähne das.
+- Wenn du dich auf ein Ergebnis beziehst, nenne die Quelle
+  nach Möglichkeit mit Namen oder URL.
+- Die Suchergebnisse können unvollständig sein.
+- Die URLs stammen aus der tatsächlichen Websuche.
+
+RECHERCHEERGEBNISSE:
+
+{web_context}
+"""
+            }
+        )
+
+    messages.append(
+        {
+            "role": "user",
+            "content": user_text,
+        }
+    )
+
+    data = {
+        "model": OPENROUTER_MODEL,
+        "messages": messages,
     }
 
     try:
@@ -268,7 +503,8 @@ def frage_ki(user_text):
             )
 
             print(
-                f"OpenRouter Antwort: {response.text}"
+                f"OpenRouter Antwort: "
+                f"{response.text}"
             )
 
             return None
@@ -277,25 +513,42 @@ def frage_ki(user_text):
 
         result = response.json()
 
-        answer = result["choices"][0]["message"]["content"]
+        answer = result[
+            "choices"
+        ][0][
+            "message"
+        ][
+            "content"
+        ]
 
         return answer
 
     except requests.exceptions.Timeout:
 
-        print("OpenRouter Timeout")
+        print(
+            "OpenRouter Timeout"
+        )
 
         return None
 
     except requests.exceptions.RequestException as error:
 
-        print(f"OpenRouter Fehler: {error}")
+        print(
+            f"OpenRouter Fehler: {error}"
+        )
 
         return None
 
-    except (KeyError, IndexError, TypeError, ValueError) as error:
+    except (
+        KeyError,
+        IndexError,
+        TypeError,
+        ValueError
+    ) as error:
 
-        print(f"OpenRouter Antwortfehler: {error}")
+        print(
+            f"OpenRouter Antwortfehler: {error}"
+        )
 
         return None
 
@@ -312,12 +565,15 @@ def sprache_zu_text(
 
     if not GROQ_API_KEY:
 
-        print("GROQ_API_KEY fehlt.")
+        print(
+            "GROQ_API_KEY fehlt."
+        )
 
         return None
 
     headers = {
-        "Authorization": f"Bearer {GROQ_API_KEY}",
+        "Authorization":
+            f"Bearer {GROQ_API_KEY}",
     }
 
     files = {
@@ -329,10 +585,17 @@ def sprache_zu_text(
     }
 
     data = {
-        "model": GROQ_STT_MODEL,
-        "language": "de",
-        "response_format": "json",
-        "temperature": "0",
+        "model":
+            GROQ_STT_MODEL,
+
+        "language":
+            "de",
+
+        "response_format":
+            "json",
+
+        "temperature":
+            "0",
     }
 
     try:
@@ -352,7 +615,8 @@ def sprache_zu_text(
         if response.status_code != 200:
 
             print(
-                f"Groq Fehler {response.status_code}: "
+                f"Groq Fehler "
+                f"{response.status_code}: "
                 f"{response.text}"
             )
 
@@ -360,11 +624,16 @@ def sprache_zu_text(
 
         result = response.json()
 
-        text = result.get("text", "").strip()
+        text = result.get(
+            "text",
+            ""
+        ).strip()
 
         if not text:
 
-            print("Groq: Keine Sprache erkannt.")
+            print(
+                "Groq: Keine Sprache erkannt."
+            )
 
             return None
 
@@ -376,22 +645,30 @@ def sprache_zu_text(
 
     except requests.exceptions.Timeout:
 
-        print("Groq Timeout")
+        print(
+            "Groq Timeout"
+        )
 
         return None
 
     except requests.exceptions.RequestException as error:
 
         print(
-            f"Groq Netzwerkfehler: {error}"
+            f"Groq Netzwerkfehler: "
+            f"{error}"
         )
 
         return None
 
-    except (KeyError, TypeError, ValueError) as error:
+    except (
+        KeyError,
+        TypeError,
+        ValueError
+    ) as error:
 
         print(
-            f"Groq Antwortfehler: {error}"
+            f"Groq Antwortfehler: "
+            f"{error}"
         )
 
         return None
@@ -409,32 +686,47 @@ def text_zu_sprache(text):
 
     if not FISH_API_KEY:
 
-        print("FISH_API_KEY fehlt.")
+        print(
+            "FISH_API_KEY fehlt."
+        )
 
         return None
 
     if not FISH_VOICE_ID:
 
-        print("FISH_VOICE_ID fehlt.")
+        print(
+            "FISH_VOICE_ID fehlt."
+        )
 
         return None
 
     headers = {
-        "Authorization": f"Bearer {FISH_API_KEY}",
-        "Content-Type": "application/json",
-        "model": FISH_MODEL,
+        "Authorization":
+            f"Bearer {FISH_API_KEY}",
+
+        "Content-Type":
+            "application/json",
+
+        "model":
+            FISH_MODEL,
     }
 
     data = {
-        "text": text,
-        "reference_id": FISH_VOICE_ID,
-        "format": "mp3",
+        "text":
+            text,
+
+        "reference_id":
+            FISH_VOICE_ID,
+
+        "format":
+            "mp3",
     }
 
     try:
 
         print(
-            "Fish Audio: Erzeuge Sprachausgabe..."
+            "Fish Audio: "
+            "Erzeuge Sprachausgabe..."
         )
 
         response = requests.post(
@@ -455,21 +747,25 @@ def text_zu_sprache(text):
             return None
 
         print(
-            "Fish Audio: Audio erfolgreich erzeugt."
+            "Fish Audio: "
+            "Audio erfolgreich erzeugt."
         )
 
         return response.content
 
     except requests.exceptions.Timeout:
 
-        print("Fish Audio Timeout")
+        print(
+            "Fish Audio Timeout"
+        )
 
         return None
 
     except requests.exceptions.RequestException as error:
 
         print(
-            f"Fish Audio Netzwerkfehler: {error}"
+            f"Fish Audio Netzwerkfehler: "
+            f"{error}"
         )
 
         return None
@@ -485,13 +781,14 @@ async def sende_jarvis_antwort(
 ):
 
     if not update.message:
+
         return
 
     if not answer:
 
         await update.message.reply_text(
             "OpenRouter ist gerade am Limit. "
-            "Das kostenlose Tageskontingent ist vermutlich "
+            "Das kostenlose Kontingent ist vermutlich "
             "aufgebraucht. Ich brauche kurz eine Pause."
         )
 
@@ -543,7 +840,62 @@ async def sende_jarvis_antwort(
 
 
 # ============================================================
-# EINZIGER NACHRICHTEN-HANDLER
+# NACHRICHT VERARBEITEN
+# ============================================================
+
+def verarbeite_text(
+    user_text,
+):
+
+    print(
+        f"Liam: {user_text}"
+    )
+
+    # --------------------------------------------------------
+    # ENTSCHEIDEN, OB INTERNETRECHERCHE NÖTIG IST
+    # --------------------------------------------------------
+
+    web_context = None
+
+    if soll_recherchieren(
+        user_text
+    ):
+
+        print(
+            "JARVIS: Internetrecherche wird durchgeführt."
+        )
+
+        results = internet_suche(
+            user_text
+        )
+
+        if results:
+
+            web_context = (
+                suche_kontext_erstellen(
+                    results
+                )
+            )
+
+        else:
+
+            print(
+                "JARVIS: Keine brauchbaren "
+                "Suchergebnisse erhalten."
+            )
+
+    # --------------------------------------------------------
+    # OPENROUTER
+    # --------------------------------------------------------
+
+    return frage_ki(
+        user_text,
+        web_context,
+    )
+
+
+# ============================================================
+# TELEGRAM UPDATE
 # ============================================================
 
 async def handle_update(
@@ -563,7 +915,9 @@ async def handle_update(
 
     if message.text:
 
-        user_text = message.text.strip()
+        user_text = (
+            message.text.strip()
+        )
 
         if not user_text:
 
@@ -573,7 +927,7 @@ async def handle_update(
             f"Liam (Text): {user_text}"
         )
 
-        answer = frage_ki(
+        answer = verarbeite_text(
             user_text
         )
 
@@ -585,7 +939,7 @@ async def handle_update(
         return
 
     # ========================================================
-    # TELEGRAM VOICE MESSAGE
+    # TELEGRAM VOICE
     # ========================================================
 
     if message.voice:
@@ -595,21 +949,26 @@ async def handle_update(
         )
 
         print(
-            "Liam (Voice): Sprachnachricht erhalten."
+            "Liam (Voice): "
+            "Sprachnachricht erhalten."
         )
 
         print(
-            f"Voice ID: {message.voice.file_id}"
+            f"Voice ID: "
+            f"{message.voice.file_id}"
         )
 
         print(
-            f"Voice Länge: {message.voice.duration} Sekunden"
+            f"Voice Länge: "
+            f"{message.voice.duration} Sekunden"
         )
 
         try:
 
-            telegram_file = await context.bot.get_file(
-                message.voice.file_id
+            telegram_file = (
+                await context.bot.get_file(
+                    message.voice.file_id
+                )
             )
 
             audio_bytes = bytes(
@@ -625,17 +984,19 @@ async def handle_update(
             # GROQ
             # ------------------------------------------------
 
-            transcribed_text = sprache_zu_text(
-                audio_bytes,
-                "voice.ogg",
-                "audio/ogg",
+            transcribed_text = (
+                sprache_zu_text(
+                    audio_bytes,
+                    "voice.ogg",
+                    "audio/ogg",
+                )
             )
 
             if not transcribed_text:
 
                 await message.reply_text(
-                    "Ich konnte deine Sprachnachricht "
-                    "nicht verstehen."
+                    "Ich konnte deine "
+                    "Sprachnachricht nicht verstehen."
                 )
 
                 return
@@ -646,10 +1007,10 @@ async def handle_update(
             )
 
             # ------------------------------------------------
-            # OPENROUTER
+            # INTERNET + OPENROUTER
             # ------------------------------------------------
 
-            answer = frage_ki(
+            answer = verarbeite_text(
                 transcribed_text
             )
 
@@ -683,13 +1044,16 @@ async def handle_update(
     if message.audio:
 
         print(
-            "Liam (Audio): Audiodatei erhalten."
+            "Liam (Audio): "
+            "Audiodatei erhalten."
         )
 
         try:
 
-            telegram_file = await context.bot.get_file(
-                message.audio.file_id
+            telegram_file = (
+                await context.bot.get_file(
+                    message.audio.file_id
+                )
             )
 
             audio_bytes = bytes(
@@ -711,17 +1075,19 @@ async def handle_update(
                 or "audio/mpeg"
             )
 
-            transcribed_text = sprache_zu_text(
-                audio_bytes,
-                file_name,
-                mime_type,
+            transcribed_text = (
+                sprache_zu_text(
+                    audio_bytes,
+                    file_name,
+                    mime_type,
+                )
             )
 
             if not transcribed_text:
 
                 await message.reply_text(
-                    "Ich konnte die Audiodatei "
-                    "nicht verstehen."
+                    "Ich konnte die "
+                    "Audiodatei nicht verstehen."
                 )
 
                 return
@@ -731,7 +1097,7 @@ async def handle_update(
                 f"{transcribed_text}"
             )
 
-            answer = frage_ki(
+            answer = verarbeite_text(
                 transcribed_text
             )
 
@@ -762,16 +1128,26 @@ async def handle_update(
 def main():
 
     required_variables = {
-        "TELEGRAM_TOKEN": TELEGRAM_TOKEN,
-        "OPENROUTER_API_KEY": OPENROUTER_API_KEY,
-        "FISH_API_KEY": FISH_API_KEY,
-        "FISH_VOICE_ID": FISH_VOICE_ID,
-        "GROQ_API_KEY": GROQ_API_KEY,
+        "TELEGRAM_TOKEN":
+            TELEGRAM_TOKEN,
+
+        "OPENROUTER_API_KEY":
+            OPENROUTER_API_KEY,
+
+        "FISH_API_KEY":
+            FISH_API_KEY,
+
+        "FISH_VOICE_ID":
+            FISH_VOICE_ID,
+
+        "GROQ_API_KEY":
+            GROQ_API_KEY,
     }
 
     missing = [
         name
-        for name, value in required_variables.items()
+        for name, value
+        in required_variables.items()
         if not value
     ]
 
@@ -802,10 +1178,6 @@ def main():
         .token(TELEGRAM_TOKEN)
         .build()
     )
-
-    # Wir verwenden bewusst einen einzigen Handler.
-    # Dadurch prüfen wir selbst, ob die Nachricht Text,
-    # Voice oder Audio enthält.
 
     application.add_handler(
         MessageHandler(
@@ -839,7 +1211,7 @@ def main():
     )
 
     print(
-        "Telegram Voice Handler: AKTIV"
+        "Internetrecherche: AKTIV"
     )
 
     print(
@@ -862,4 +1234,5 @@ def main():
 # ============================================================
 
 if __name__ == "__main__":
+
     main()
