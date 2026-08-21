@@ -30,7 +30,7 @@ FISH_VOICE_ID = os.getenv("FISH_VOICE_ID")
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 FISH_URL = "https://api.fish.audio/v1/tts"
 
-OPENROUTER_MODEL = "openrouter/free"
+OPENROUTER_MODEL = "google/gemma-4-31b-it:free"
 FISH_MODEL = "s2.1-pro-free"
 
 
