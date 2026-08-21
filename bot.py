@@ -1,5 +1,7 @@
 import os
+import io
 import requests
+
 from telegram import Update
 from telegram.ext import (
     Application,
@@ -8,17 +10,29 @@ from telegram.ext import (
     filters,
 )
 
+
 # ============================================================
-# KONFIGURATION
+# API-KEYS
 # ============================================================
 
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
+FISH_API_KEY = os.getenv("FISH_API_KEY")
+FISH_VOICE_ID = os.getenv("FISH_VOICE_ID")
+
+
+# ============================================================
+# API-EINSTELLUNGEN
+# ============================================================
 
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
+FISH_URL = "https://api.fish.audio/v1/tts"
 
-# Kostenloses Modell über OpenRouter
-MODEL = "openrouter/free"
+# Kostenloses OpenRouter-Modell
+OPENROUTER_MODEL = "openrouter/free"
+
+# Kostenloses Fish-Audio-Modell
+FISH_MODEL = "s2.1-pro-free"
 
 
 # ============================================================
@@ -138,14 +152,10 @@ Liam ist dein Partner.
 
 
 # ============================================================
-# OPENROUTER
+# OPENROUTER - KI ANTWORT
 # ============================================================
 
 def frage_ki(user_text: str) -> str:
-    """
-    Sendet Liams Nachricht an OpenRouter
-    und gibt die Antwort der KI zurück.
-    """
 
     headers = {
         "Authorization": f"Bearer {OPENROUTER_API_KEY}",
@@ -155,7 +165,7 @@ def frage_ki(user_text: str) -> str:
     }
 
     data = {
-        "model": MODEL,
+        "model": OPENROUTER_MODEL,
         "messages": [
             {
                 "role": "system",
@@ -169,6 +179,7 @@ def frage_ki(user_text: str) -> str:
     }
 
     try:
+
         response = requests.post(
             OPENROUTER_URL,
             headers=headers,
@@ -180,31 +191,75 @@ def frage_ki(user_text: str) -> str:
 
         result = response.json()
 
-        answer = result["choices"][0]["message"]["content"]
-
-        return answer
+        return result["choices"][0]["message"]["content"]
 
     except requests.exceptions.Timeout:
+
         return (
             "Die KI lässt sich gerade etwas zu viel Zeit. "
             "Versuch es gleich noch einmal."
         )
 
     except requests.exceptions.RequestException as error:
+
         print(f"OpenRouter Fehler: {error}")
 
         return (
-            "Ich kann OpenRouter gerade nicht erreichen. "
-            "Sieht nach einem technischen Problem aus."
+            "OpenRouter ist gerade nicht erreichbar. "
+            "Offenbar braucht die Technik eine kleine Pause."
         )
 
     except (KeyError, IndexError, TypeError, ValueError) as error:
-        print(f"Antwortfehler: {error}")
+
+        print(f"OpenRouter Antwortfehler: {error}")
 
         return (
-            "Ich habe von der KI eine ungültige Antwort bekommen. "
-            "Technik. Sie findet immer einen Weg, sich wichtigzumachen."
+            "Ich habe von der KI eine ungültige Antwort bekommen."
         )
+
+
+# ============================================================
+# FISH AUDIO - TEXT ZU SPRACHE
+# ============================================================
+
+def text_zu_sprache(text: str):
+
+    headers = {
+        "Authorization": f"Bearer {FISH_API_KEY}",
+        "Content-Type": "application/json",
+        "model": FISH_MODEL,
+    }
+
+    data = {
+        "text": text,
+        "reference_id": FISH_VOICE_ID,
+        "format": "mp3",
+    }
+
+    try:
+
+        response = requests.post(
+            FISH_URL,
+            headers=headers,
+            json=data,
+            timeout=120,
+        )
+
+        response.raise_for_status()
+
+        return response.content
+
+    except requests.exceptions.Timeout:
+
+        print("Fish Audio Timeout")
+
+        return None
+
+    except requests.exceptions.RequestException as error:
+
+        print(f"Fish Audio Fehler: {error}")
+
+        return None
 
 
 # ============================================================
@@ -215,9 +270,6 @@ async def handle_message(
     update: Update,
     context: ContextTypes.DEFAULT_TYPE,
 ):
-    """
-    Verarbeitet normale Textnachrichten aus Telegram.
-    """
 
     if not update.message:
         return
@@ -229,11 +281,46 @@ async def handle_message(
 
     print(f"Liam: {user_text}")
 
+    # --------------------------------------------------------
+    # 1. KI ANTWORT
+    # --------------------------------------------------------
+
     answer = frage_ki(user_text)
 
     print(f"JARVIS: {answer}")
 
+    # --------------------------------------------------------
+    # 2. TEXT AN TELEGRAM
+    # --------------------------------------------------------
+
     await update.message.reply_text(answer)
+
+    # --------------------------------------------------------
+    # 3. TEXT IN SPRACHE UMWANDELN
+    # --------------------------------------------------------
+
+    audio_data = text_zu_sprache(answer)
+
+    if audio_data:
+
+        # MP3 für Telegram vorbereiten
+        audio_file = io.BytesIO(audio_data)
+
+        audio_file.name = "jarvis.mp3"
+
+        # ----------------------------------------------------
+        # 4. AUDIO AN TELEGRAM
+        # ----------------------------------------------------
+
+        await update.message.reply_audio(
+            audio=audio_file,
+            title="JARVIS",
+            performer="JARVIS",
+        )
+
+    else:
+
+        print("TTS konnte nicht erzeugt werden.")
 
 
 # ============================================================
@@ -242,15 +329,33 @@ async def handle_message(
 
 def main():
 
-    if not TELEGRAM_TOKEN:
+    # --------------------------------------------------------
+    # KONFIGURATION PRÜFEN
+    # --------------------------------------------------------
+
+    required_variables = {
+        "TELEGRAM_TOKEN": TELEGRAM_TOKEN,
+        "OPENROUTER_API_KEY": OPENROUTER_API_KEY,
+        "FISH_API_KEY": FISH_API_KEY,
+        "FISH_VOICE_ID": FISH_VOICE_ID,
+    }
+
+    missing = [
+        name
+        for name, value in required_variables.items()
+        if not value
+    ]
+
+    if missing:
+
         raise RuntimeError(
-            "TELEGRAM_TOKEN wurde nicht gefunden."
+            "Folgende Environment Variables fehlen: "
+            + ", ".join(missing)
         )
 
-    if not OPENROUTER_API_KEY:
-        raise RuntimeError(
-            "OPENROUTER_API_KEY wurde nicht gefunden."
-        )
+    # --------------------------------------------------------
+    # TELEGRAM APPLICATION
+    # --------------------------------------------------------
 
     application = (
         Application.builder()
@@ -258,6 +363,7 @@ def main():
         .build()
     )
 
+    # Normale Textnachrichten verarbeiten
     application.add_handler(
         MessageHandler(
             filters.TEXT & ~filters.COMMAND,
@@ -267,6 +373,8 @@ def main():
 
     print("====================================")
     print("JARVIS ist online.")
+    print("OpenRouter: AKTIV")
+    print("Fish Audio: AKTIV")
     print("Warte auf Telegram-Nachrichten...")
     print("====================================")
 
