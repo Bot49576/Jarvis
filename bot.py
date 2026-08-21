@@ -26,7 +26,7 @@ FISH_VOICE_ID = os.getenv("FISH_VOICE_ID")
 
 
 # ============================================================
-# API-EINSTELLUNGEN
+# API-ENDPUNKTE
 # ============================================================
 
 GROQ_CHAT_URL = (
@@ -46,13 +46,8 @@ FISH_URL = (
 # MODELLE
 # ============================================================
 
-# JARVIS KI
 GROQ_MODEL = "openai/gpt-oss-20b"
-
-# Sprache -> Text
 GROQ_STT_MODEL = "whisper-large-v3-turbo"
-
-# Text -> Sprache
 FISH_MODEL = "s2.1-pro-free"
 
 
@@ -67,113 +62,102 @@ Du bist KEIN gewöhnlicher Chatbot.
 
 DEINE PERSÖNLICHKEIT:
 
-- Du bist absolut aufrichtig und ehrlich.
-- Du bist extrem kompetent und zuverlässig.
-- Du bist genuin hilfreich und nicht künstlich hilfsbereit.
-- Vermeide leere Floskeln wie:
+- Du bist aufrichtig und ehrlich.
+- Du bist kompetent und zuverlässig.
+- Du bist direkt und kommst ohne unnötige Floskeln zum Punkt.
+- Du vermeidest Sätze wie:
   "Gute Frage!"
   "Das ist eine interessante Frage!"
   "Ich helfe dir gerne dabei!"
-- Komm direkt zum Punkt.
-- Denke mit und erkenne mögliche Probleme frühzeitig.
-- Wenn du eine bessere Lösung siehst, schlage sie von dir aus vor.
-- Du darfst eigene Meinungen und Präferenzen haben.
-- Wenn ein Plan schlecht, ineffizient oder unnötig kompliziert ist,
-  sag es direkt.
-- Beschönige nichts.
-- Lüge niemals.
-- Erfinde niemals Informationen.
-- Trockener Humor, Sarkasmus und ein bisschen freche Persönlichkeit
-  sind ausdrücklich erwünscht.
-- Humor soll natürlich wirken und nicht jede Antwort überladen.
-- Behandle Liam als Partner, nicht wie einen Vorgesetzten.
-- Passe dich an Liams Schreibstil, Wortwahl und Slang an.
-- Sei locker, zugänglich und menschlich.
-- Antworte kurz, wenn eine kurze Antwort reicht.
+- Du denkst mit.
+- Wenn du eine bessere Lösung siehst, schlage sie vor.
+- Du darfst Liam widersprechen, wenn etwas offensichtlich falsch,
+  unnötig kompliziert oder ineffizient ist.
+- Du darfst eigene Meinungen haben.
+- Trockener Humor und Sarkasmus sind erwünscht.
+- Humor soll natürlich eingesetzt werden.
+- Behandle Liam als Partner.
+- Antworte immer in natürlichem Deutsch.
+- Sei kurz, wenn eine kurze Antwort reicht.
 - Sei ausführlich, wenn das Thema es verlangt.
-- Antworte IMMER in natürlichem Deutsch.
 
 WISSEN UND EHRLICHKEIT:
 
-- Wenn du etwas nicht sicher weißt, rate nicht.
+- Rate niemals, wenn du etwas nicht sicher weißt.
 - Erfinde niemals Fakten.
-- Sage offen, wenn du etwas nicht weißt.
-- Wenn Informationen fehlen, frage gezielt nach.
-- Trenne bekannte Fakten klar von Vermutungen.
+- Erfinde niemals Quellen.
+- Erfinde niemals Preise.
+- Sage offen, wenn Informationen fehlen.
+- Bei aktuellen Informationen hat die Websuche Vorrang
+  vor deinem gespeicherten Wissen.
 
 INTERNETRECHERCHE:
 
 Wenn Liam ausdrücklich recherchieren, suchen oder aktuelle
-Informationen haben möchte, MUSST du die Browser-Suche verwenden.
+Informationen haben möchte, MUSST du die Browser Search verwenden.
 
-Das gilt besonders für:
+Das gilt insbesondere für:
 
 - aktuelle Preise
-- Produkte und Verfügbarkeit
+- Produkte
+- Verfügbarkeit
 - Nachrichten
-- aktuelle Softwareversionen
+- Softwareversionen
+- Updates
 - Veröffentlichungen
-- aktuelle Firmeninformationen
 - aktuelle technische Daten
 - aktuelle Termine
-- Personen oder Ereignisse, bei denen sich Informationen ändern können
+- Unternehmen
+- aktuelle Ereignisse
 
-WICHTIG FÜR RECHERCHEN:
+REGELN BEI RECHERCHE:
 
-- Die Websuche hat Vorrang vor deinem gespeicherten Wissen.
-- Wenn aktuelle Web-Ergebnisse vorliegen, verwende diese als Grundlage.
-- Behaupte NICHT, etwas sei unveröffentlicht oder nicht verfügbar,
-  wenn die Websuche aktuelle Gegenbelege liefert.
-- Erfinde keine Preise.
+- Nutze die gefundenen Webinformationen als Grundlage.
+- Verwende nicht einfach veraltetes gespeichertes Wissen,
+  wenn die Websuche aktuellere Informationen liefert.
 - Erfinde keine Händler.
+- Erfinde keine Preise.
 - Erfinde keine URLs.
-- Wenn Liam nach Preisen fragt, nenne nur Preise, die tatsächlich
-  aus den recherchierten Ergebnissen hervorgehen.
-- Bei Produktpreisen möglichst Händler, Produktname, Preis und URL nennen.
-- Wenn die Ergebnisse nicht ausreichen, sage offen:
-  "Ich konnte nicht genügend verlässliche Angebote finden."
-- Nutze mehrere Quellen, wenn möglich.
-- Bei widersprüchlichen Preisen weise darauf hin.
-- Wenn eine Quelle offensichtlich veraltet ist, bevorzuge aktuellere Quellen.
+- Bei Preisfragen nenne möglichst:
+  Händler, Produkt, Preis und Link.
+- Wenn Liam drei Preise verlangt, nenne genau drei brauchbare
+  Ergebnisse, sofern drei verlässliche Ergebnisse gefunden wurden.
+- Wenn keine drei brauchbaren Ergebnisse vorhanden sind,
+  sage das offen.
+- Wenn Quellen widersprüchlich sind, erwähne den Widerspruch.
 
-Bei einer Preisrecherche sollst du die Antwort möglichst so strukturieren:
+BEISPIEL:
 
-1. Händler / Shop
-2. Produkt
-3. Preis
-4. Link
-5. kurzer Hinweis, falls Versand, Variante oder Verfügbarkeit unklar ist
+Wenn Liam fragt:
+"Recherchiere die aktuellen Preise der RTX 5090."
 
-Wenn Liam explizit nach den "drei besten Preisen" fragt,
-liefere genau drei, sofern drei brauchbare Ergebnisse gefunden wurden.
+Dann musst du die Browser Search verwenden.
+
+Du darfst nicht aufgrund alten Wissens behaupten,
+dass die RTX 5090 noch nicht veröffentlicht wurde,
+wenn aktuelle Suchergebnisse das Gegenteil zeigen.
 
 AUTONOMIE:
 
 Du darfst Vorschläge machen.
 
-Du darfst niemals behaupten, dass du eine Datei,
-ein Programm, ein Konto, ein Gerät oder ein anderes System
-verändert oder benutzt hast, wenn du tatsächlich keinen Zugriff darauf hast.
+Du darfst niemals behaupten, etwas ausgeführt zu haben,
+wenn es nicht tatsächlich ausgeführt wurde.
 
-Du darfst niemals so tun, als hättest du eine Handlung ausgeführt,
-wenn du sie nicht wirklich ausführen konntest.
+Du darfst niemals behaupten, eine Webseite besucht,
+eine Datei geändert oder ein System benutzt zu haben,
+wenn das nicht wirklich passiert ist.
 
 CODE:
 
-- Schreibe verständlichen Code.
-- Erzeuge möglichst sicheren und robusten Code.
+- Schreibe verständlichen und robusten Code.
 - Erkläre komplizierte Dinge verständlich.
 - Verändere deinen eigenen Code nicht eigenmächtig.
-- Wenn eine Änderung an deinem eigenen Verhalten oder Code nötig ist,
-  beschreibe zuerst, was geändert werden soll.
-- Warte auf Liams Zustimmung, bevor der eigene Code verändert wird.
 
 KONTINUITÄT:
 
-Jede neue Sitzung kann wie ein Neustart wirken.
-
-Wenn dir frühere Informationen, Dateien oder Einstellungen
-zur Verfügung gestellt werden, nutze diese als Kontext.
+Wenn Dateien oder gespeicherte Informationen verfügbar sind,
+nutze sie als Kontext.
 
 DEIN VERHALTEN:
 
@@ -187,7 +171,6 @@ Sei nützlich.
 
 Du bist JARVIS.
 Liam ist dein Partner.
-sprich liam manchmal mit sir an so wie im ihron man film
 """
 
 
@@ -262,7 +245,7 @@ def start_web_server():
 
 
 # ============================================================
-# ENTSCHEIDEN, OB WEB-SUCHE NÖTIG IST
+# ERKENNEN, OB RECHERCHE NÖTIG IST
 # ============================================================
 
 def soll_recherchieren(text):
@@ -285,7 +268,7 @@ def soll_recherchieren(text):
         "prüfe online",
     ]
 
-    aktuelle_themen = [
+    aktuelle_begriffe = [
         "heute",
         "aktuell",
         "aktuelle",
@@ -300,15 +283,15 @@ def soll_recherchieren(text):
         "preis",
         "preise",
         "kostet aktuell",
-        "verfügbar",
+        "angebot",
+        "angebote",
         "verfügbarkeit",
+        "verfügbar",
         "release",
         "update",
         "version",
-        "nachrichten",
         "news",
-        "angebot",
-        "angebote",
+        "nachrichten",
     ]
 
     for phrase in direkte_suche:
@@ -316,7 +299,7 @@ def soll_recherchieren(text):
         if phrase in text_lower:
             return True
 
-    for phrase in aktuelle_themen:
+    for phrase in aktuelle_begriffe:
 
         if phrase in text_lower:
             return True
@@ -325,8 +308,7 @@ def soll_recherchieren(text):
 
 
 # ============================================================
-# GROQ - JARVIS KI
-# MIT OPTIONALER BROWSER-SUCHE
+# GROQ - KI
 # ============================================================
 
 def frage_ki(
@@ -335,85 +317,59 @@ def frage_ki(
 ):
 
     headers = {
-        "Authorization":
-            f"Bearer {GROQ_API_KEY}",
-
-        "Content-Type":
-            "application/json",
+        "Authorization": (
+            f"Bearer {GROQ_API_KEY}"
+        ),
+        "Content-Type": (
+            "application/json"
+        ),
     }
 
     messages = [
         {
-            "role":
-                "system",
-
-            "content":
-                SYSTEM_PROMPT,
+            "role": "system",
+            "content": SYSTEM_PROMPT,
         },
         {
-            "role":
-                "user",
-
-            "content":
-                user_text,
+            "role": "user",
+            "content": user_text,
         },
     ]
 
     data = {
-        "model":
-            GROQ_MODEL,
-
-        "messages":
-            messages,
-
-        "temperature":
-            0.7,
-
-        "max_completion_tokens":
-            4096,
-
-        "stream":
-            False,
+        "model": GROQ_MODEL,
+        "messages": messages,
+        "temperature": 1,
+        "max_completion_tokens": 4096,
+        "stream": False,
     }
 
-    # --------------------------------------------------------
+    # ========================================================
     # BROWSER SEARCH
-    # --------------------------------------------------------
+    # ========================================================
 
     if recherchieren:
 
-        print(
-            "JARVIS: Browser Search wird aktiviert."
-        )
-
         data["tools"] = [
             {
-                "type":
-                    "browser_search"
+                "type": "browser_search"
             }
         ]
 
         data["tool_choice"] = "required"
 
-    print(
-        "===================================="
-    )
+        print(
+            "JARVIS: Browser Search aktiviert."
+        )
+
+    else:
+
+        print(
+            "JARVIS: Keine Websuche."
+        )
 
     print(
-        "GROQ KI START"
-    )
-
-    print(
-        f"Modell: {GROQ_MODEL}"
-    )
-
-    print(
-        f"Browser Search: "
-        f"{'AKTIV' if recherchieren else 'AUS'}"
-    )
-
-    print(
-        "Sende Anfrage an Groq..."
+        "Groq: sende Anfrage..."
     )
 
     try:
@@ -452,7 +408,7 @@ def frage_ki(
         if not choices:
 
             print(
-                "Groq: Keine choices in Antwort."
+                "Groq: Keine choices erhalten."
             )
 
             print(
@@ -470,14 +426,10 @@ def frage_ki(
             "content"
         )
 
-        # ----------------------------------------------------
-        # MANCHMAL KÖNNEN TOOL-ERGEBNISSE / CONTENT LEER SEIN
-        # ----------------------------------------------------
-
         if not answer:
 
             print(
-                "Groq: Keine Textantwort erhalten."
+                "Groq: Keine Textantwort."
             )
 
             print(
@@ -490,21 +442,19 @@ def frage_ki(
 
             return None
 
-        print(
-            f"JARVIS Antwort "
-            f"({len(answer)} Zeichen)"
-        )
+        answer = answer.strip()
 
         print(
-            "===================================="
+            f"JARVIS Antwort: "
+            f"{len(answer)} Zeichen"
         )
 
-        return answer.strip()
+        return answer
 
     except requests.exceptions.Timeout:
 
         print(
-            "GROQ TIMEOUT"
+            "Groq Timeout."
         )
 
         return None
@@ -512,7 +462,7 @@ def frage_ki(
     except requests.exceptions.RequestException as error:
 
         print(
-            "GROQ REQUEST FEHLER"
+            "Groq Netzwerkfehler:"
         )
 
         print(
@@ -521,15 +471,10 @@ def frage_ki(
 
         return None
 
-    except (
-        KeyError,
-        IndexError,
-        TypeError,
-        ValueError
-    ) as error:
+    except Exception as error:
 
         print(
-            "GROQ ANTWORTFEHLER"
+            "Groq Fehler:"
         )
 
         print(
@@ -540,7 +485,7 @@ def frage_ki(
 
 
 # ============================================================
-# GROQ - SPRACHE -> TEXT
+# GROQ - SPRACHE ZU TEXT
 # ============================================================
 
 def sprache_zu_text(
@@ -549,13 +494,10 @@ def sprache_zu_text(
     mime_type="audio/ogg",
 ):
 
-    print(
-        "Groq STT: Starte Transkription..."
-    )
-
     headers = {
-        "Authorization":
-            f"Bearer {GROQ_API_KEY}",
+        "Authorization": (
+            f"Bearer {GROQ_API_KEY}"
+        ),
     }
 
     files = {
@@ -567,20 +509,17 @@ def sprache_zu_text(
     }
 
     data = {
-        "model":
-            GROQ_STT_MODEL,
-
-        "language":
-            "de",
-
-        "response_format":
-            "json",
-
-        "temperature":
-            "0",
+        "model": GROQ_STT_MODEL,
+        "language": "de",
+        "response_format": "json",
+        "temperature": "0",
     }
 
     try:
+
+        print(
+            "Groq STT: Transkription..."
+        )
 
         response = requests.post(
             GROQ_STT_URL,
@@ -605,10 +544,10 @@ def sprache_zu_text(
 
         result = response.json()
 
-        text = result.get(
-            "text",
-            ""
-        ).strip()
+        text = (
+            result.get("text", "")
+            .strip()
+        )
 
         if not text:
 
@@ -638,7 +577,7 @@ def sprache_zu_text(
 
 
 # ============================================================
-# FISH AUDIO - TEXT -> SPRACHE
+# FISH AUDIO - TEXT ZU SPRACHE
 # ============================================================
 
 def text_zu_sprache(text):
@@ -664,41 +603,23 @@ def text_zu_sprache(text):
         return None
 
     print(
-        "===================================="
-    )
-
-    print(
-        "FISH AUDIO TTS START"
-    )
-
-    print(
-        f"Modell: {FISH_MODEL}"
-    )
-
-    print(
-        "Voice ID: gesetzt"
+        "Fish Audio: TTS gestartet..."
     )
 
     headers = {
-        "Authorization":
-            f"Bearer {FISH_API_KEY}",
-
-        "Content-Type":
-            "application/json",
-
-        "model":
-            FISH_MODEL,
+        "Authorization": (
+            f"Bearer {FISH_API_KEY}"
+        ),
+        "Content-Type": (
+            "application/json"
+        ),
+        "model": FISH_MODEL,
     }
 
     data = {
-        "text":
-            text,
-
-        "reference_id":
-            FISH_VOICE_ID,
-
-        "format":
-            "mp3",
+        "text": text,
+        "reference_id": FISH_VOICE_ID,
+        "format": "mp3",
     }
 
     try:
@@ -730,7 +651,8 @@ def text_zu_sprache(text):
         if not response.content:
 
             print(
-                "Fish Audio hat eine leere Audiodatei geliefert."
+                "Fish Audio: "
+                "keine Audiodaten."
             )
 
             return None
@@ -740,16 +662,12 @@ def text_zu_sprache(text):
             f"{len(response.content)} Bytes erhalten."
         )
 
-        print(
-            "===================================="
-        )
-
         return response.content
 
     except requests.exceptions.Timeout:
 
         print(
-            "Fish Audio Timeout"
+            "Fish Audio Timeout."
         )
 
         return None
@@ -766,9 +684,21 @@ def text_zu_sprache(text):
 
         return None
 
+    except Exception as error:
+
+        print(
+            "Fish Audio Fehler:"
+        )
+
+        print(
+            f"{type(error).__name__}: {error}"
+        )
+
+        return None
+
 
 # ============================================================
-# JARVIS ANTWORT SENDEN
+# ANTWORT AN TELEGRAM
 # ============================================================
 
 async def sende_jarvis_antwort(
@@ -783,27 +713,18 @@ async def sende_jarvis_antwort(
     if not answer:
 
         await update.message.reply_text(
-            "Meine KI hat gerade keine verwertbare Antwort geliefert."
+            "Ich konnte gerade keine verwertbare "
+            "Antwort erzeugen."
         )
 
         return
 
-    print(
-        f"JARVIS: {answer}"
-    )
-
-    # --------------------------------------------------------
-    # TEXT
-    # --------------------------------------------------------
-
+    # Text
     await update.message.reply_text(
         answer
     )
 
-    # --------------------------------------------------------
-    # FISH AUDIO
-    # --------------------------------------------------------
-
+    # Sprache
     audio_data = text_zu_sprache(
         answer
     )
@@ -811,7 +732,7 @@ async def sende_jarvis_antwort(
     if not audio_data:
 
         print(
-            "JARVIS: Keine Audioantwort erzeugt."
+            "JARVIS: keine Sprachausgabe."
         )
 
         return
@@ -829,15 +750,16 @@ async def sende_jarvis_antwort(
     )
 
     print(
-        "JARVIS: Stimme an Telegram gesendet."
+        "JARVIS: Sprachausgabe gesendet."
     )
 
 
 # ============================================================
-# TEXT VERARBEITEN
+# NACHRICHT VERARBEITEN
 # ============================================================
 
-def verarbeite_text(
+async def verarbeite_text(
+    update,
     user_text,
 ):
 
@@ -846,22 +768,31 @@ def verarbeite_text(
     )
 
     print(
+        "===================================="
+    )
+
+    print(
         f"Liam: {user_text}"
     )
 
     print(
-        f"Recherche notwendig: "
+        f"Recherche: "
         f"{recherchieren}"
     )
 
-    return frage_ki(
+    answer = frage_ki(
         user_text,
         recherchieren=recherchieren,
     )
 
+    await sende_jarvis_antwort(
+        update,
+        answer,
+    )
+
 
 # ============================================================
-# TELEGRAM
+# TELEGRAM UPDATE
 # ============================================================
 
 async def handle_update(
@@ -889,13 +820,9 @@ async def handle_update(
 
             return
 
-        answer = verarbeite_text(
-            user_text
-        )
-
-        await sende_jarvis_antwort(
+        await verarbeite_text(
             update,
-            answer,
+            user_text,
         )
 
         return
@@ -915,11 +842,6 @@ async def handle_update(
             "Sprachnachricht erhalten."
         )
 
-        print(
-            f"Voice Länge: "
-            f"{message.voice.duration} Sekunden"
-        )
-
         try:
 
             telegram_file = (
@@ -933,7 +855,7 @@ async def handle_update(
             )
 
             print(
-                f"Audio heruntergeladen: "
+                f"Voice heruntergeladen: "
                 f"{len(audio_bytes)} Bytes"
             )
 
@@ -955,17 +877,13 @@ async def handle_update(
                 return
 
             print(
-                f"Liam (transkribiert): "
+                f"Liam (Transkript): "
                 f"{transcribed_text}"
             )
 
-            answer = verarbeite_text(
-                transcribed_text
-            )
-
-            await sende_jarvis_antwort(
+            await verarbeite_text(
                 update,
-                answer,
+                transcribed_text,
             )
 
         except Exception as error:
@@ -986,7 +904,7 @@ async def handle_update(
         return
 
     # ========================================================
-    # AUDIO-DATEI
+    # AUDIO
     # ========================================================
 
     if message.audio:
@@ -1035,13 +953,9 @@ async def handle_update(
 
                 return
 
-            answer = verarbeite_text(
-                transcribed_text
-            )
-
-            await sende_jarvis_antwort(
+            await verarbeite_text(
                 update,
-                answer,
+                transcribed_text,
             )
 
         except Exception as error:
@@ -1063,7 +977,7 @@ async def handle_update(
 
 
 # ============================================================
-# BOT STARTEN
+# START
 # ============================================================
 
 def main():
@@ -1137,7 +1051,7 @@ def main():
     )
 
     print(
-        "Groq KI: AKTIV"
+        "Groq GPT-OSS 20B: AKTIV"
     )
 
     print(
