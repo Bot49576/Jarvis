@@ -1,7 +1,9 @@
 import os
 import io
-import requests
+import threading
+from http.server import BaseHTTPRequestHandler, HTTPServer
 
+import requests
 from telegram import Update
 from telegram.ext import (
     Application,
@@ -28,10 +30,7 @@ FISH_VOICE_ID = os.getenv("FISH_VOICE_ID")
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 FISH_URL = "https://api.fish.audio/v1/tts"
 
-# Kostenloses OpenRouter-Modell
 OPENROUTER_MODEL = "openrouter/free"
-
-# Kostenloses Fish-Audio-Modell
 FISH_MODEL = "s2.1-pro-free"
 
 
@@ -152,6 +151,41 @@ Liam ist dein Partner.
 
 
 # ============================================================
+# RENDER HEALTH SERVER
+# ============================================================
+
+class HealthHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        if self.path in ("/", "/health"):
+            body = b"JARVIS is online."
+            self.send_response(200)
+            self.send_header("Content-Type", "text/plain; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        else:
+            body = b"Not Found"
+            self.send_response(404)
+            self.send_header("Content-Type", "text/plain; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+    def log_message(self, format, *args):
+        return
+
+
+def start_web_server():
+    port = int(os.getenv("PORT", "10000"))
+
+    server = HTTPServer(("0.0.0.0", port), HealthHandler)
+
+    print(f"Render Health Server läuft auf Port {port}")
+
+    server.serve_forever()
+
+
+# ============================================================
 # OPENROUTER - KI ANTWORT
 # ============================================================
 
@@ -179,7 +213,6 @@ def frage_ki(user_text: str) -> str:
     }
 
     try:
-
         response = requests.post(
             OPENROUTER_URL,
             headers=headers,
@@ -206,7 +239,8 @@ def frage_ki(user_text: str) -> str:
 
         return (
             "OpenRouter ist gerade nicht erreichbar. "
-            "Offenbar braucht die Technik eine kleine Pause."
+            "Die Technik hat offenbar beschlossen, "
+            "kurz dramatisch zu sein."
         )
 
     except (KeyError, IndexError, TypeError, ValueError) as error:
@@ -227,13 +261,13 @@ def text_zu_sprache(text: str):
     headers = {
         "Authorization": f"Bearer {FISH_API_KEY}",
         "Content-Type": "application/json",
-        "model": FISH_MODEL,
     }
 
     data = {
         "text": text,
         "reference_id": FISH_VOICE_ID,
         "format": "mp3",
+        "model": FISH_MODEL,
     }
 
     try:
@@ -296,31 +330,27 @@ async def handle_message(
     await update.message.reply_text(answer)
 
     # --------------------------------------------------------
-    # 3. TEXT IN SPRACHE UMWANDELN
+    # 3. FISH AUDIO
     # --------------------------------------------------------
 
     audio_data = text_zu_sprache(answer)
 
-    if audio_data:
+    if not audio_data:
+        print("Fish Audio konnte keine Audiodatei erzeugen.")
+        return
 
-        # MP3 für Telegram vorbereiten
-        audio_file = io.BytesIO(audio_data)
+    # --------------------------------------------------------
+    # 4. AUDIO AN TELEGRAM
+    # --------------------------------------------------------
 
-        audio_file.name = "jarvis.mp3"
+    audio_file = io.BytesIO(audio_data)
+    audio_file.name = "jarvis.mp3"
 
-        # ----------------------------------------------------
-        # 4. AUDIO AN TELEGRAM
-        # ----------------------------------------------------
-
-        await update.message.reply_audio(
-            audio=audio_file,
-            title="JARVIS",
-            performer="JARVIS",
-        )
-
-    else:
-
-        print("TTS konnte nicht erzeugt werden.")
+    await update.message.reply_audio(
+        audio=audio_file,
+        title="JARVIS",
+        performer="JARVIS",
+    )
 
 
 # ============================================================
@@ -328,10 +358,6 @@ async def handle_message(
 # ============================================================
 
 def main():
-
-    # --------------------------------------------------------
-    # KONFIGURATION PRÜFEN
-    # --------------------------------------------------------
 
     required_variables = {
         "TELEGRAM_TOKEN": TELEGRAM_TOKEN,
@@ -347,14 +373,24 @@ def main():
     ]
 
     if missing:
-
         raise RuntimeError(
             "Folgende Environment Variables fehlen: "
             + ", ".join(missing)
         )
 
     # --------------------------------------------------------
-    # TELEGRAM APPLICATION
+    # RENDER WEB SERVER IN EIGENEM THREAD STARTEN
+    # --------------------------------------------------------
+
+    web_thread = threading.Thread(
+        target=start_web_server,
+        daemon=True,
+    )
+
+    web_thread.start()
+
+    # --------------------------------------------------------
+    # TELEGRAM BOT
     # --------------------------------------------------------
 
     application = (
@@ -363,7 +399,6 @@ def main():
         .build()
     )
 
-    # Normale Textnachrichten verarbeiten
     application.add_handler(
         MessageHandler(
             filters.TEXT & ~filters.COMMAND,
@@ -375,6 +410,7 @@ def main():
     print("JARVIS ist online.")
     print("OpenRouter: AKTIV")
     print("Fish Audio: AKTIV")
+    print("Render Web Server: AKTIV")
     print("Warte auf Telegram-Nachrichten...")
     print("====================================")
 
