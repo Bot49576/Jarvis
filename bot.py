@@ -20,28 +20,28 @@ from telegram.ext import (
 # ============================================================
 
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
-OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 FISH_API_KEY = os.getenv("FISH_API_KEY")
 FISH_VOICE_ID = os.getenv("FISH_VOICE_ID")
-GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 
 
 # ============================================================
 # API-EINSTELLUNGEN
 # ============================================================
 
-OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
-FISH_URL = "https://api.fish.audio/v1/tts"
+GROQ_CHAT_URL = "https://api.groq.com/openai/v1/chat/completions"
 GROQ_STT_URL = "https://api.groq.com/openai/v1/audio/transcriptions"
 
-# OpenRouter
-OPENROUTER_MODEL = "openai/gpt-oss-20b:free"
+FISH_URL = "https://api.fish.audio/v1/tts"
+
+# Groq KI
+GROQ_MODEL = "openai/gpt-oss-20b"
+
+# Groq Sprache -> Text
+GROQ_STT_MODEL = "whisper-large-v3-turbo"
 
 # Fish Audio
 FISH_MODEL = "s2.1-pro-free"
-
-# Groq Speech-to-Text
-GROQ_STT_MODEL = "whisper-large-v3-turbo"
 
 
 # ============================================================
@@ -93,21 +93,17 @@ WISSEN UND EHRLICHKEIT:
 
 INTERNETRECHERCHE:
 
-- Du hast Zugriff auf eine Websuche.
-- Wenn Liam ausdrücklich sagt:
-  "recherchiere", "such im Internet", "suche online",
-  "finde heraus" oder Ähnliches, MUSST du die Websuche verwenden.
-- Verwende die Websuche auch bei Informationen, die offensichtlich
-  aktuell sein können, zum Beispiel Nachrichten, aktuelle Preise,
-  neue Produkte, aktuelle Softwareversionen oder Ereignisse.
-- Wenn eine Websuche durchgeführt wurde, unterscheide klar zwischen
-  Informationen aus den Suchergebnissen und deinem allgemeinen Wissen.
-- Behaupte niemals, eine Webseite gelesen zu haben, wenn sie nicht
-  tatsächlich in den Suchergebnissen enthalten war.
-- Wenn die Suche keine brauchbaren Ergebnisse liefert, sage das offen.
-- Erfinde niemals Suchergebnisse.
-- Bei aktuellen oder wichtigen Informationen bevorzuge mehrere
-  unabhängige Suchergebnisse, wenn möglich.
+- Du kannst auf Web-Recherche zugreifen.
+- Wenn Liam ausdrücklich recherchieren, suchen oder aktuelle
+  Informationen haben möchte, recherchiere zuerst.
+- Bei aktuellen Informationen wie Nachrichten, Preisen,
+  Softwareversionen, Produkten, Veröffentlichungen oder Ereignissen
+  sollst du möglichst aktuelle Quellen verwenden.
+- Behaupte niemals, eine Webseite gelesen zu haben, wenn du sie
+  tatsächlich nicht abgerufen oder als Rechercheergebnis erhalten hast.
+- Erfinde niemals Quellen oder Suchergebnisse.
+- Wenn Suchergebnisse widersprüchlich oder unvollständig sind,
+  sage das offen.
 
 PROBLEMLÖSUNG:
 
@@ -117,7 +113,7 @@ Wenn Liam dir eine Aufgabe gibt:
 2. Prüfe, welche Informationen vorhanden sind.
 3. Erkenne fehlende Informationen.
 4. Entwickle einen sinnvollen Plan.
-5. Recherchiere, wenn aktuelle oder unbekannte Informationen benötigt werden.
+5. Recherchiere bei aktuellen oder unbekannten Informationen.
 6. Schlage eine bessere Lösung vor, wenn du eine erkennst.
 7. Gib nicht einfach irgendeine Antwort, nur um etwas zu sagen.
 
@@ -240,76 +236,15 @@ def start_web_server():
         HealthHandler
     )
 
-    print(f"Render Health Server läuft auf Port {port}")
+    print(
+        f"Render Health Server läuft auf Port {port}"
+    )
 
     server.serve_forever()
 
 
 # ============================================================
-# ENTSCHEIDEN, OB WEBRECHERCHE NÖTIG IST
-# ============================================================
-
-def soll_recherchieren(text):
-
-    text_lower = text.lower()
-
-    direkte_suchbegriffe = [
-        "recherchiere",
-        "recherche",
-        "such im internet",
-        "suche im internet",
-        "such online",
-        "suche online",
-        "google das",
-        "google bitte",
-        "finde heraus",
-        "schau im internet",
-        "schau online",
-        "prüf online",
-        "prüfe online",
-        "nachschauen",
-        "nachschau",
-    ]
-
-    aktuelle_begriffe = [
-        "heute",
-        "gerade",
-        "aktuell",
-        "aktuelle",
-        "aktuellste",
-        "neueste",
-        "neuesten",
-        "morgen",
-        "diese woche",
-        "diesen monat",
-        "2026",
-        "preis",
-        "preise",
-        "kostet aktuell",
-        "verfügbar",
-        "release",
-        "update",
-        "version",
-        "nachrichten",
-        "news",
-        "ereignis",
-    ]
-
-    for phrase in direkte_suchbegriffe:
-
-        if phrase in text_lower:
-            return True
-
-    for phrase in aktuelle_begriffe:
-
-        if phrase in text_lower:
-            return True
-
-    return False
-
-
-# ============================================================
-# INTERNET-SUCHE MIT DDGS
+# WEB-RECHERCHE
 # ============================================================
 
 def internet_suche(query):
@@ -356,9 +291,6 @@ def internet_suche(query):
                 ""
             )
 
-            if not title and not body:
-                continue
-
             clean_results.append(
                 {
                     "title": title,
@@ -377,16 +309,12 @@ def internet_suche(query):
     except Exception as error:
 
         print(
-            "Websuche Fehler: "
+            f"Websuche Fehler: "
             f"{type(error).__name__}: {error}"
         )
 
         return []
 
-
-# ============================================================
-# SUCHERGEBNISSE FÜR OPENROUTER AUFBEREITEN
-# ============================================================
 
 def suche_kontext_erstellen(results):
 
@@ -396,29 +324,23 @@ def suche_kontext_erstellen(results):
 
     parts = []
 
-    for index, result in enumerate(results, start=1):
-
-        title = result.get(
-            "title",
-            "Ohne Titel"
-        )
-
-        url = result.get(
-            "url",
-            ""
-        )
-
-        body = result.get(
-            "body",
-            ""
-        )
+    for index, result in enumerate(
+        results,
+        start=1
+    ):
 
         parts.append(
             f"""
 QUELLE {index}
-Titel: {title}
-URL: {url}
-Inhalt: {body}
+
+Titel:
+{result.get("title", "")}
+
+URL:
+{result.get("url", "")}
+
+Inhalt:
+{result.get("body", "")}
 """
         )
 
@@ -426,7 +348,7 @@ Inhalt: {body}
 
 
 # ============================================================
-# OPENROUTER - KI ANTWORT
+# GROQ - JARVIS KI
 # ============================================================
 
 def frage_ki(
@@ -435,16 +357,20 @@ def frage_ki(
 ):
 
     headers = {
-        "Authorization": f"Bearer {OPENROUTER_API_KEY}",
-        "Content-Type": "application/json",
-        "HTTP-Referer": "https://telegram.org",
-        "X-Title": "JARVIS Telegram Bot",
+        "Authorization":
+            f"Bearer {GROQ_API_KEY}",
+
+        "Content-Type":
+            "application/json",
     }
 
     messages = [
         {
-            "role": "system",
-            "content": SYSTEM_PROMPT,
+            "role":
+                "system",
+
+            "content":
+                SYSTEM_PROMPT,
         }
     ]
 
@@ -452,20 +378,22 @@ def frage_ki(
 
         messages.append(
             {
-                "role": "system",
-                "content": f"""
-JARVIS HAT EINE WEBRECHERCHE DURCHGEFÜHRT.
+                "role":
+                    "system",
 
-Verwende die folgenden Suchergebnisse als Recherchematerial.
+                "content":
+                    f"""
+JARVIS HAT WEBRECHERCHE DURCHGEFÜHRT.
+
+Verwende die folgenden Ergebnisse als Recherchematerial.
 
 WICHTIG:
-- Erfinde keine Informationen, die nicht durch die Ergebnisse
-  oder dein gesichertes Wissen gestützt werden.
-- Wenn die Ergebnisse widersprüchlich sind, erwähne das.
-- Wenn du dich auf ein Ergebnis beziehst, nenne die Quelle
-  nach Möglichkeit mit Namen oder URL.
-- Die Suchergebnisse können unvollständig sein.
-- Die URLs stammen aus der tatsächlichen Websuche.
+
+- Erfinde keine Informationen.
+- Wenn Ergebnisse widersprüchlich sind,
+  erwähne dies.
+- Nenne die Quelle nach Möglichkeit.
+- Suchergebnisse können unvollständig sein.
 
 RECHERCHEERGEBNISSE:
 
@@ -476,57 +404,91 @@ RECHERCHEERGEBNISSE:
 
     messages.append(
         {
-            "role": "user",
-            "content": user_text,
+            "role":
+                "user",
+
+            "content":
+                user_text,
         }
     )
 
     data = {
-        "model": OPENROUTER_MODEL,
-        "messages": messages,
+        "model":
+            GROQ_MODEL,
+
+        "messages":
+            messages,
+
+        "temperature":
+            0.7,
+
+        "max_completion_tokens":
+            2048,
+
+        "stream":
+            False,
+
+        "include_reasoning":
+            False,
     }
 
     try:
 
+        print(
+            "Groq: JARVIS verarbeitet Anfrage..."
+        )
+
         response = requests.post(
-            OPENROUTER_URL,
+            GROQ_CHAT_URL,
             headers=headers,
             json=data,
-            timeout=60,
+            timeout=120,
         )
 
         if response.status_code == 429:
 
             print(
-                "OpenRouter Fehler 429: "
+                "Groq Fehler 429: "
                 "Rate-Limit erreicht."
             )
 
             print(
-                f"OpenRouter Antwort: "
+                response.text
+            )
+
+            return None
+
+        if response.status_code != 200:
+
+            print(
+                f"Groq KI Fehler "
+                f"{response.status_code}: "
                 f"{response.text}"
             )
 
             return None
 
-        response.raise_for_status()
-
         result = response.json()
 
-        answer = result[
-            "choices"
-        ][0][
-            "message"
-        ][
-            "content"
-        ]
+        answer = (
+            result["choices"][0]
+            ["message"]["content"]
+        )
 
-        return answer
+        if not answer:
+
+            print(
+                "Groq: Leere Antwort."
+            )
+
+            return None
+
+        return answer.strip()
 
     except requests.exceptions.Timeout:
 
         print(
-            "OpenRouter Timeout"
+            "Groq KI Timeout"
         )
 
         return None
@@ -534,7 +496,8 @@ RECHERCHEERGEBNISSE:
     except requests.exceptions.RequestException as error:
 
         print(
-            f"OpenRouter Fehler: {error}"
+            f"Groq KI Netzwerkfehler: "
+            f"{error}"
         )
 
         return None
@@ -547,7 +510,8 @@ RECHERCHEERGEBNISSE:
     ) as error:
 
         print(
-            f"OpenRouter Antwortfehler: {error}"
+            f"Groq KI Antwortfehler: "
+            f"{error}"
         )
 
         return None
@@ -562,14 +526,6 @@ def sprache_zu_text(
     file_name="voice.ogg",
     mime_type="audio/ogg",
 ):
-
-    if not GROQ_API_KEY:
-
-        print(
-            "GROQ_API_KEY fehlt."
-        )
-
-        return None
 
     headers = {
         "Authorization":
@@ -615,7 +571,7 @@ def sprache_zu_text(
         if response.status_code != 200:
 
             print(
-                f"Groq Fehler "
+                f"Groq STT Fehler "
                 f"{response.status_code}: "
                 f"{response.text}"
             )
@@ -638,7 +594,8 @@ def sprache_zu_text(
             return None
 
         print(
-            f"Groq Transkript: {text}"
+            f"Groq Transkript: "
+            f"{text}"
         )
 
         return text
@@ -646,7 +603,7 @@ def sprache_zu_text(
     except requests.exceptions.Timeout:
 
         print(
-            "Groq Timeout"
+            "Groq STT Timeout"
         )
 
         return None
@@ -654,20 +611,7 @@ def sprache_zu_text(
     except requests.exceptions.RequestException as error:
 
         print(
-            f"Groq Netzwerkfehler: "
-            f"{error}"
-        )
-
-        return None
-
-    except (
-        KeyError,
-        TypeError,
-        ValueError
-    ) as error:
-
-        print(
-            f"Groq Antwortfehler: "
+            f"Groq STT Netzwerkfehler: "
             f"{error}"
         )
 
@@ -675,28 +619,12 @@ def sprache_zu_text(
 
 
 # ============================================================
-# FISH AUDIO - TEXT ZU SPRACHE
+# FISH AUDIO
 # ============================================================
 
 def text_zu_sprache(text):
 
     if not text:
-
-        return None
-
-    if not FISH_API_KEY:
-
-        print(
-            "FISH_API_KEY fehlt."
-        )
-
-        return None
-
-    if not FISH_VOICE_ID:
-
-        print(
-            "FISH_VOICE_ID fehlt."
-        )
 
         return None
 
@@ -772,7 +700,7 @@ def text_zu_sprache(text):
 
 
 # ============================================================
-# JARVIS ANTWORT AN TELEGRAM SENDEN
+# ANTWORT SENDEN
 # ============================================================
 
 async def sende_jarvis_antwort(
@@ -780,16 +708,12 @@ async def sende_jarvis_antwort(
     answer,
 ):
 
-    if not update.message:
-
-        return
-
     if not answer:
 
         await update.message.reply_text(
-            "OpenRouter ist gerade am Limit. "
-            "Das kostenlose Kontingent ist vermutlich "
-            "aufgebraucht. Ich brauche kurz eine Pause."
+            "Meine KI ist gerade nicht erreichbar. "
+            "Praktischerweise passiert so etwas immer "
+            "genau dann, wenn man sie braucht."
         )
 
         return
@@ -798,18 +722,12 @@ async def sende_jarvis_antwort(
         f"JARVIS: {answer}"
     )
 
-    # --------------------------------------------------------
-    # TEXT
-    # --------------------------------------------------------
-
+    # Text
     await update.message.reply_text(
         answer
     )
 
-    # --------------------------------------------------------
-    # STIMME
-    # --------------------------------------------------------
-
+    # Stimme
     audio_data = text_zu_sprache(
         answer
     )
@@ -817,7 +735,7 @@ async def sende_jarvis_antwort(
     if not audio_data:
 
         print(
-            "JARVIS: Keine Audioantwort verfügbar."
+            "Keine Audioantwort verfügbar."
         )
 
         return
@@ -835,12 +753,12 @@ async def sende_jarvis_antwort(
     )
 
     print(
-        "JARVIS: Audio an Telegram gesendet."
+        "JARVIS: Audio gesendet."
     )
 
 
 # ============================================================
-# NACHRICHT VERARBEITEN
+# TEXT VERARBEITEN
 # ============================================================
 
 def verarbeite_text(
@@ -851,18 +769,63 @@ def verarbeite_text(
         f"Liam: {user_text}"
     )
 
-    # --------------------------------------------------------
-    # ENTSCHEIDEN, OB INTERNETRECHERCHE NÖTIG IST
-    # --------------------------------------------------------
-
     web_context = None
 
-    if soll_recherchieren(
-        user_text
-    ):
+    # --------------------------------------------------------
+    # EXPLIZITE RECHERCHE
+    # --------------------------------------------------------
+
+    recherche_begriffe = [
+        "recherchiere",
+        "recherche",
+        "such im internet",
+        "suche im internet",
+        "such online",
+        "suche online",
+        "finde heraus",
+        "schau im internet",
+        "schau online",
+        "prüfe online",
+        "prüf online",
+    ]
+
+    aktuelle_begriffe = [
+        "heute",
+        "aktuell",
+        "aktuelle",
+        "aktuellste",
+        "neueste",
+        "neuesten",
+        "gerade",
+        "morgen",
+        "diese woche",
+        "diesen monat",
+        "2026",
+        "preis",
+        "preise",
+        "kostet aktuell",
+        "news",
+        "nachrichten",
+    ]
+
+    text_lower = user_text.lower()
+
+    soll_suchen = (
+        any(
+            phrase in text_lower
+            for phrase in recherche_begriffe
+        )
+        or
+        any(
+            phrase in text_lower
+            for phrase in aktuelle_begriffe
+        )
+    )
+
+    if soll_suchen:
 
         print(
-            "JARVIS: Internetrecherche wird durchgeführt."
+            "JARVIS: Webrecherche aktiviert."
         )
 
         results = internet_suche(
@@ -877,15 +840,8 @@ def verarbeite_text(
                 )
             )
 
-        else:
-
-            print(
-                "JARVIS: Keine brauchbaren "
-                "Suchergebnisse erhalten."
-            )
-
     # --------------------------------------------------------
-    # OPENROUTER
+    # GROQ KI
     # --------------------------------------------------------
 
     return frage_ki(
@@ -895,12 +851,12 @@ def verarbeite_text(
 
 
 # ============================================================
-# TELEGRAM UPDATE
+# TELEGRAM
 # ============================================================
 
 async def handle_update(
-    update: Update,
-    context: ContextTypes.DEFAULT_TYPE,
+    update,
+    context,
 ):
 
     if not update.message:
@@ -923,10 +879,6 @@ async def handle_update(
 
             return
 
-        print(
-            f"Liam (Text): {user_text}"
-        )
-
         answer = verarbeite_text(
             user_text
         )
@@ -939,7 +891,7 @@ async def handle_update(
         return
 
     # ========================================================
-    # TELEGRAM VOICE
+    # VOICE
     # ========================================================
 
     if message.voice:
@@ -951,11 +903,6 @@ async def handle_update(
         print(
             "Liam (Voice): "
             "Sprachnachricht erhalten."
-        )
-
-        print(
-            f"Voice ID: "
-            f"{message.voice.file_id}"
         )
 
         print(
@@ -980,10 +927,6 @@ async def handle_update(
                 f"{len(audio_bytes)} Bytes"
             )
 
-            # ------------------------------------------------
-            # GROQ
-            # ------------------------------------------------
-
             transcribed_text = (
                 sprache_zu_text(
                     audio_bytes,
@@ -1006,10 +949,6 @@ async def handle_update(
                 f"{transcribed_text}"
             )
 
-            # ------------------------------------------------
-            # INTERNET + OPENROUTER
-            # ------------------------------------------------
-
             answer = verarbeite_text(
                 transcribed_text
             )
@@ -1019,14 +958,10 @@ async def handle_update(
                 answer,
             )
 
-            print(
-                "===================================="
-            )
-
         except Exception as error:
 
             print(
-                f"Voice-Verarbeitungsfehler: "
+                f"Voice-Fehler: "
                 f"{type(error).__name__}: {error}"
             )
 
@@ -1038,7 +973,7 @@ async def handle_update(
         return
 
     # ========================================================
-    # AUDIO-DATEI
+    # AUDIO
     # ========================================================
 
     if message.audio:
@@ -1058,11 +993,6 @@ async def handle_update(
 
             audio_bytes = bytes(
                 await telegram_file.download_as_bytearray()
-            )
-
-            print(
-                f"Audio heruntergeladen: "
-                f"{len(audio_bytes)} Bytes"
             )
 
             file_name = (
@@ -1092,11 +1022,6 @@ async def handle_update(
 
                 return
 
-            print(
-                f"Liam (transkribiert): "
-                f"{transcribed_text}"
-            )
-
             answer = verarbeite_text(
                 transcribed_text
             )
@@ -1109,7 +1034,7 @@ async def handle_update(
         except Exception as error:
 
             print(
-                f"Audio-Verarbeitungsfehler: "
+                f"Audio-Fehler: "
                 f"{type(error).__name__}: {error}"
             )
 
@@ -1122,7 +1047,7 @@ async def handle_update(
 
 
 # ============================================================
-# BOT STARTEN
+# START
 # ============================================================
 
 def main():
@@ -1131,17 +1056,14 @@ def main():
         "TELEGRAM_TOKEN":
             TELEGRAM_TOKEN,
 
-        "OPENROUTER_API_KEY":
-            OPENROUTER_API_KEY,
+        "GROQ_API_KEY":
+            GROQ_API_KEY,
 
         "FISH_API_KEY":
             FISH_API_KEY,
 
         "FISH_VOICE_ID":
             FISH_VOICE_ID,
-
-        "GROQ_API_KEY":
-            GROQ_API_KEY,
     }
 
     missing = [
@@ -1199,11 +1121,7 @@ def main():
     )
 
     print(
-        "OpenRouter: AKTIV"
-    )
-
-    print(
-        "Fish Audio: AKTIV"
+        "Groq KI: AKTIV"
     )
 
     print(
@@ -1211,7 +1129,15 @@ def main():
     )
 
     print(
-        "Internetrecherche: AKTIV"
+        "Fish Audio: AKTIV"
+    )
+
+    print(
+        "Websuche: AKTIV"
+    )
+
+    print(
+        "OpenRouter: NICHT VERWENDET"
     )
 
     print(
