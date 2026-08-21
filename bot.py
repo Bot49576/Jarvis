@@ -30,7 +30,10 @@ FISH_VOICE_ID = os.getenv("FISH_VOICE_ID")
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 FISH_URL = "https://api.fish.audio/v1/tts"
 
-OPENROUTER_MODEL = "gpt-oss-20b:free"
+# Kostenloses OpenRouter-Modell
+OPENROUTER_MODEL = "openai/gpt-oss-20b:free"
+
+# Kostenloses Fish-Audio-Modell
 FISH_MODEL = "s2.1-pro-free"
 
 
@@ -155,20 +158,40 @@ Liam ist dein Partner.
 # ============================================================
 
 class HealthHandler(BaseHTTPRequestHandler):
+
     def do_GET(self):
         if self.path in ("/", "/health"):
+
             body = b"JARVIS is online."
+
             self.send_response(200)
-            self.send_header("Content-Type", "text/plain; charset=utf-8")
-            self.send_header("Content-Length", str(len(body)))
+            self.send_header(
+                "Content-Type",
+                "text/plain; charset=utf-8"
+            )
+            self.send_header(
+                "Content-Length",
+                str(len(body))
+            )
             self.end_headers()
+
             self.wfile.write(body)
+
         else:
+
             body = b"Not Found"
+
             self.send_response(404)
-            self.send_header("Content-Type", "text/plain; charset=utf-8")
-            self.send_header("Content-Length", str(len(body)))
+            self.send_header(
+                "Content-Type",
+                "text/plain; charset=utf-8"
+            )
+            self.send_header(
+                "Content-Length",
+                str(len(body))
+            )
             self.end_headers()
+
             self.wfile.write(body)
 
     def log_message(self, format, *args):
@@ -176,9 +199,13 @@ class HealthHandler(BaseHTTPRequestHandler):
 
 
 def start_web_server():
+
     port = int(os.getenv("PORT", "10000"))
 
-    server = HTTPServer(("0.0.0.0", port), HealthHandler)
+    server = HTTPServer(
+        ("0.0.0.0", port),
+        HealthHandler
+    )
 
     print(f"Render Health Server läuft auf Port {port}")
 
@@ -213,6 +240,7 @@ def frage_ki(user_text: str) -> str:
     }
 
     try:
+
         response = requests.post(
             OPENROUTER_URL,
             headers=headers,
@@ -228,6 +256,8 @@ def frage_ki(user_text: str) -> str:
 
     except requests.exceptions.Timeout:
 
+        print("OpenRouter Timeout")
+
         return (
             "Die KI lässt sich gerade etwas zu viel Zeit. "
             "Versuch es gleich noch einmal."
@@ -239,8 +269,7 @@ def frage_ki(user_text: str) -> str:
 
         return (
             "OpenRouter ist gerade nicht erreichbar. "
-            "Die Technik hat offenbar beschlossen, "
-            "kurz dramatisch zu sein."
+            "Die Technik braucht offenbar einen Kaffee."
         )
 
     except (KeyError, IndexError, TypeError, ValueError) as error:
@@ -258,16 +287,20 @@ def frage_ki(user_text: str) -> str:
 
 def text_zu_sprache(text: str):
 
+    # WICHTIG:
+    # Das Modell "s2.1-pro-free" gehört in den HEADER.
+    # Fish Audio dokumentiert genau diese Struktur.
+
     headers = {
         "Authorization": f"Bearer {FISH_API_KEY}",
         "Content-Type": "application/json",
+        "model": FISH_MODEL,
     }
 
     data = {
         "text": text,
         "reference_id": FISH_VOICE_ID,
         "format": "mp3",
-        "model": FISH_MODEL,
     }
 
     try:
@@ -279,7 +312,12 @@ def text_zu_sprache(text: str):
             timeout=120,
         )
 
-        response.raise_for_status()
+        if response.status_code != 200:
+            print(
+                f"Fish Audio Fehler {response.status_code}: "
+                f"{response.text}"
+            )
+            return None
 
         return response.content
 
@@ -291,7 +329,7 @@ def text_zu_sprache(text: str):
 
     except requests.exceptions.RequestException as error:
 
-        print(f"Fish Audio Fehler: {error}")
+        print(f"Fish Audio Netzwerkfehler: {error}")
 
         return None
 
@@ -315,35 +353,40 @@ async def handle_message(
 
     print(f"Liam: {user_text}")
 
-    # --------------------------------------------------------
-    # 1. KI ANTWORT
-    # --------------------------------------------------------
+    # ========================================================
+    # 1. KI-ANTWORT
+    # ========================================================
 
     answer = frage_ki(user_text)
 
     print(f"JARVIS: {answer}")
 
-    # --------------------------------------------------------
+    # ========================================================
     # 2. TEXT AN TELEGRAM
-    # --------------------------------------------------------
+    # ========================================================
 
     await update.message.reply_text(answer)
 
-    # --------------------------------------------------------
+    # ========================================================
     # 3. FISH AUDIO
-    # --------------------------------------------------------
+    # ========================================================
 
     audio_data = text_zu_sprache(answer)
 
     if not audio_data:
-        print("Fish Audio konnte keine Audiodatei erzeugen.")
+
+        print(
+            "Fish Audio konnte keine Audiodatei erzeugen."
+        )
+
         return
 
-    # --------------------------------------------------------
+    # ========================================================
     # 4. AUDIO AN TELEGRAM
-    # --------------------------------------------------------
+    # ========================================================
 
     audio_file = io.BytesIO(audio_data)
+
     audio_file.name = "jarvis.mp3"
 
     await update.message.reply_audio(
@@ -373,14 +416,15 @@ def main():
     ]
 
     if missing:
+
         raise RuntimeError(
             "Folgende Environment Variables fehlen: "
             + ", ".join(missing)
         )
 
-    # --------------------------------------------------------
-    # RENDER WEB SERVER IN EIGENEM THREAD STARTEN
-    # --------------------------------------------------------
+    # ========================================================
+    # RENDER WEB SERVER
+    # ========================================================
 
     web_thread = threading.Thread(
         target=start_web_server,
@@ -389,9 +433,9 @@ def main():
 
     web_thread.start()
 
-    # --------------------------------------------------------
+    # ========================================================
     # TELEGRAM BOT
-    # --------------------------------------------------------
+    # ========================================================
 
     application = (
         Application.builder()
