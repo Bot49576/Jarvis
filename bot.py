@@ -260,44 +260,61 @@ def frage_ki(user_text):
             timeout=60,
         )
 
+        if response.status_code == 429:
+
+            print(
+                "OpenRouter Fehler 429: "
+                "Rate-Limit erreicht."
+            )
+
+            print(
+                f"OpenRouter Antwort: {response.text}"
+            )
+
+            return None
+
         response.raise_for_status()
 
         result = response.json()
 
-        return result["choices"][0]["message"]["content"]
+        answer = result["choices"][0]["message"]["content"]
+
+        return answer
 
     except requests.exceptions.Timeout:
 
         print("OpenRouter Timeout")
 
-        return (
-            "Die KI lässt sich gerade etwas zu viel Zeit. "
-            "Versuch es gleich noch einmal."
-        )
+        return None
 
     except requests.exceptions.RequestException as error:
 
         print(f"OpenRouter Fehler: {error}")
 
-        return (
-            "OpenRouter ist gerade nicht erreichbar. "
-            "Die Technik braucht offenbar einen Kaffee."
-        )
+        return None
 
     except (KeyError, IndexError, TypeError, ValueError) as error:
 
         print(f"OpenRouter Antwortfehler: {error}")
 
-        return (
-            "Ich habe von der KI eine ungültige Antwort bekommen."
-        )
+        return None
 
 
 # ============================================================
 # GROQ - SPRACHE ZU TEXT
 # ============================================================
 
-def sprache_zu_text(audio_bytes, file_name="voice.ogg", mime_type="audio/ogg"):
+def sprache_zu_text(
+    audio_bytes,
+    file_name="voice.ogg",
+    mime_type="audio/ogg",
+):
+
+    if not GROQ_API_KEY:
+
+        print("GROQ_API_KEY fehlt.")
+
+        return None
 
     headers = {
         "Authorization": f"Bearer {GROQ_API_KEY}",
@@ -319,6 +336,10 @@ def sprache_zu_text(audio_bytes, file_name="voice.ogg", mime_type="audio/ogg"):
     }
 
     try:
+
+        print(
+            "Groq: Starte Sprachtranskription..."
+        )
 
         response = requests.post(
             GROQ_STT_URL,
@@ -347,7 +368,9 @@ def sprache_zu_text(audio_bytes, file_name="voice.ogg", mime_type="audio/ogg"):
 
             return None
 
-        print(f"Groq Transkript: {text}")
+        print(
+            f"Groq Transkript: {text}"
+        )
 
         return text
 
@@ -359,13 +382,17 @@ def sprache_zu_text(audio_bytes, file_name="voice.ogg", mime_type="audio/ogg"):
 
     except requests.exceptions.RequestException as error:
 
-        print(f"Groq Netzwerkfehler: {error}")
+        print(
+            f"Groq Netzwerkfehler: {error}"
+        )
 
         return None
 
     except (KeyError, TypeError, ValueError) as error:
 
-        print(f"Groq Antwortfehler: {error}")
+        print(
+            f"Groq Antwortfehler: {error}"
+        )
 
         return None
 
@@ -376,7 +403,21 @@ def sprache_zu_text(audio_bytes, file_name="voice.ogg", mime_type="audio/ogg"):
 
 def text_zu_sprache(text):
 
-    # Das Fish-Modell gehört in den HEADER.
+    if not text:
+
+        return None
+
+    if not FISH_API_KEY:
+
+        print("FISH_API_KEY fehlt.")
+
+        return None
+
+    if not FISH_VOICE_ID:
+
+        print("FISH_VOICE_ID fehlt.")
+
+        return None
 
     headers = {
         "Authorization": f"Bearer {FISH_API_KEY}",
@@ -392,6 +433,10 @@ def text_zu_sprache(text):
 
     try:
 
+        print(
+            "Fish Audio: Erzeuge Sprachausgabe..."
+        )
+
         response = requests.post(
             FISH_URL,
             headers=headers,
@@ -402,11 +447,16 @@ def text_zu_sprache(text):
         if response.status_code != 200:
 
             print(
-                f"Fish Audio Fehler {response.status_code}: "
+                f"Fish Audio Fehler "
+                f"{response.status_code}: "
                 f"{response.text}"
             )
 
             return None
+
+        print(
+            "Fish Audio: Audio erfolgreich erzeugt."
+        )
 
         return response.content
 
@@ -418,51 +468,66 @@ def text_zu_sprache(text):
 
     except requests.exceptions.RequestException as error:
 
-        print(f"Fish Audio Netzwerkfehler: {error}")
+        print(
+            f"Fish Audio Netzwerkfehler: {error}"
+        )
 
         return None
 
 
 # ============================================================
-# TEXT-NACHRICHTEN
+# JARVIS ANTWORT AN TELEGRAM SENDEN
 # ============================================================
 
-async def handle_text_message(
+async def sende_jarvis_antwort(
     update,
-    context,
+    answer,
 ):
 
     if not update.message:
         return
 
-    user_text = update.message.text
+    if not answer:
 
-    if not user_text:
-        return
-
-    print(f"Liam (Text): {user_text}")
-
-    # KI
-    answer = frage_ki(user_text)
-
-    print(f"JARVIS: {answer}")
-
-    # Text an Telegram
-    await update.message.reply_text(answer)
-
-    # Stimme erzeugen
-    audio_data = text_zu_sprache(answer)
-
-    if not audio_data:
-
-        print(
-            "Fish Audio konnte keine Audiodatei erzeugen."
+        await update.message.reply_text(
+            "OpenRouter ist gerade am Limit. "
+            "Das kostenlose Tageskontingent ist vermutlich "
+            "aufgebraucht. Ich brauche kurz eine Pause."
         )
 
         return
 
-    # Audio senden
-    audio_file = io.BytesIO(audio_data)
+    print(
+        f"JARVIS: {answer}"
+    )
+
+    # --------------------------------------------------------
+    # TEXT
+    # --------------------------------------------------------
+
+    await update.message.reply_text(
+        answer
+    )
+
+    # --------------------------------------------------------
+    # STIMME
+    # --------------------------------------------------------
+
+    audio_data = text_zu_sprache(
+        answer
+    )
+
+    if not audio_data:
+
+        print(
+            "JARVIS: Keine Audioantwort verfügbar."
+        )
+
+        return
+
+    audio_file = io.BytesIO(
+        audio_data
+    )
 
     audio_file.name = "jarvis.mp3"
 
@@ -472,140 +537,222 @@ async def handle_text_message(
         performer="JARVIS",
     )
 
+    print(
+        "JARVIS: Audio an Telegram gesendet."
+    )
+
 
 # ============================================================
-# SPRACHNACHRICHTEN
+# EINZIGER NACHRICHTEN-HANDLER
 # ============================================================
 
-async def handle_voice_message(
-    update,
-    context,
+async def handle_update(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
 ):
 
     if not update.message:
+
         return
 
-    voice = update.message.voice
-    audio = update.message.audio
+    message = update.message
 
-    # Nur Voice oder Audio verarbeiten
-    if not voice and not audio:
-        return
+    # ========================================================
+    # TEXT
+    # ========================================================
 
-    print("Liam (Voice): Sprachnachricht erhalten.")
+    if message.text:
 
-    try:
+        user_text = message.text.strip()
 
-        # ----------------------------------------------------
-        # TELEGRAM-DATEI IDENTIFIZIEREN
-        # ----------------------------------------------------
-
-        if voice:
-
-            file_id = voice.file_id
-            file_name = "voice.ogg"
-            mime_type = "audio/ogg"
-
-        else:
-
-            file_id = audio.file_id
-            file_name = audio.file_name or "audio.mp3"
-            mime_type = audio.mime_type or "audio/mpeg"
-
-        # ----------------------------------------------------
-        # AUDIO VON TELEGRAM HERUNTERLADEN
-        # ----------------------------------------------------
-
-        telegram_file = await context.bot.get_file(
-            file_id
-        )
-
-        audio_bytes = bytes(
-            await telegram_file.download_as_bytearray()
-        )
-
-        print(
-            f"Audio heruntergeladen: "
-            f"{len(audio_bytes)} Bytes"
-        )
-
-        # ----------------------------------------------------
-        # GROQ: SPRACHE -> TEXT
-        # ----------------------------------------------------
-
-        transcribed_text = sprache_zu_text(
-            audio_bytes,
-            file_name,
-            mime_type,
-        )
-
-        if not transcribed_text:
-
-            await update.message.reply_text(
-                "Ich konnte deine Sprachnachricht nicht verstehen."
-            )
+        if not user_text:
 
             return
 
         print(
-            f"Liam (transkribiert): "
-            f"{transcribed_text}"
+            f"Liam (Text): {user_text}"
         )
-
-        # ----------------------------------------------------
-        # OPENROUTER: TEXT -> JARVIS
-        # ----------------------------------------------------
 
         answer = frage_ki(
-            transcribed_text
+            user_text
         )
 
-        print(f"JARVIS: {answer}")
-
-        # ----------------------------------------------------
-        # TEXTANTWORT
-        # ----------------------------------------------------
-
-        await update.message.reply_text(answer)
-
-        # ----------------------------------------------------
-        # FISH AUDIO: TEXT -> STIMME
-        # ----------------------------------------------------
-
-        audio_data = text_zu_sprache(answer)
-
-        if not audio_data:
-
-            print(
-                "Fish Audio konnte keine Audiodatei erzeugen."
-            )
-
-            return
-
-        # ----------------------------------------------------
-        # JARVIS-STIMME AN TELEGRAM
-        # ----------------------------------------------------
-
-        audio_file = io.BytesIO(audio_data)
-
-        audio_file.name = "jarvis.mp3"
-
-        await update.message.reply_audio(
-            audio=audio_file,
-            title="JARVIS",
-            performer="JARVIS",
+        await sende_jarvis_antwort(
+            update,
+            answer,
         )
 
-    except Exception as error:
+        return
+
+    # ========================================================
+    # TELEGRAM VOICE MESSAGE
+    # ========================================================
+
+    if message.voice:
 
         print(
-            f"Fehler bei Voice-Nachricht: {error}"
+            "===================================="
         )
 
-        await update.message.reply_text(
-            "Bei der Verarbeitung deiner "
-            "Sprachnachricht ist etwas schiefgelaufen."
+        print(
+            "Liam (Voice): Sprachnachricht erhalten."
         )
+
+        print(
+            f"Voice ID: {message.voice.file_id}"
+        )
+
+        print(
+            f"Voice Länge: {message.voice.duration} Sekunden"
+        )
+
+        try:
+
+            telegram_file = await context.bot.get_file(
+                message.voice.file_id
+            )
+
+            audio_bytes = bytes(
+                await telegram_file.download_as_bytearray()
+            )
+
+            print(
+                f"Audio heruntergeladen: "
+                f"{len(audio_bytes)} Bytes"
+            )
+
+            # ------------------------------------------------
+            # GROQ
+            # ------------------------------------------------
+
+            transcribed_text = sprache_zu_text(
+                audio_bytes,
+                "voice.ogg",
+                "audio/ogg",
+            )
+
+            if not transcribed_text:
+
+                await message.reply_text(
+                    "Ich konnte deine Sprachnachricht "
+                    "nicht verstehen."
+                )
+
+                return
+
+            print(
+                f"Liam (transkribiert): "
+                f"{transcribed_text}"
+            )
+
+            # ------------------------------------------------
+            # OPENROUTER
+            # ------------------------------------------------
+
+            answer = frage_ki(
+                transcribed_text
+            )
+
+            await sende_jarvis_antwort(
+                update,
+                answer,
+            )
+
+            print(
+                "===================================="
+            )
+
+        except Exception as error:
+
+            print(
+                f"Voice-Verarbeitungsfehler: "
+                f"{type(error).__name__}: {error}"
+            )
+
+            await message.reply_text(
+                "Bei der Verarbeitung deiner "
+                "Sprachnachricht ist etwas schiefgelaufen."
+            )
+
+        return
+
+    # ========================================================
+    # AUDIO-DATEI
+    # ========================================================
+
+    if message.audio:
+
+        print(
+            "Liam (Audio): Audiodatei erhalten."
+        )
+
+        try:
+
+            telegram_file = await context.bot.get_file(
+                message.audio.file_id
+            )
+
+            audio_bytes = bytes(
+                await telegram_file.download_as_bytearray()
+            )
+
+            print(
+                f"Audio heruntergeladen: "
+                f"{len(audio_bytes)} Bytes"
+            )
+
+            file_name = (
+                message.audio.file_name
+                or "audio.mp3"
+            )
+
+            mime_type = (
+                message.audio.mime_type
+                or "audio/mpeg"
+            )
+
+            transcribed_text = sprache_zu_text(
+                audio_bytes,
+                file_name,
+                mime_type,
+            )
+
+            if not transcribed_text:
+
+                await message.reply_text(
+                    "Ich konnte die Audiodatei "
+                    "nicht verstehen."
+                )
+
+                return
+
+            print(
+                f"Liam (transkribiert): "
+                f"{transcribed_text}"
+            )
+
+            answer = frage_ki(
+                transcribed_text
+            )
+
+            await sende_jarvis_antwort(
+                update,
+                answer,
+            )
+
+        except Exception as error:
+
+            print(
+                f"Audio-Verarbeitungsfehler: "
+                f"{type(error).__name__}: {error}"
+            )
+
+            await message.reply_text(
+                "Bei der Verarbeitung der "
+                "Audiodatei ist etwas schiefgelaufen."
+            )
+
+        return
 
 
 # ============================================================
@@ -613,8 +760,6 @@ async def handle_voice_message(
 # ============================================================
 
 def main():
-
-    # Alle benötigten Environment Variables prüfen
 
     required_variables = {
         "TELEGRAM_TOKEN": TELEGRAM_TOKEN,
@@ -638,7 +783,7 @@ def main():
         )
 
     # --------------------------------------------------------
-    # RENDER WEB SERVER
+    # RENDER
     # --------------------------------------------------------
 
     web_thread = threading.Thread(
@@ -649,7 +794,7 @@ def main():
     web_thread.start()
 
     # --------------------------------------------------------
-    # TELEGRAM BOT
+    # TELEGRAM
     # --------------------------------------------------------
 
     application = (
@@ -658,25 +803,14 @@ def main():
         .build()
     )
 
-    # --------------------------------------------------------
-    # TEXT-NACHRICHTEN
-    # --------------------------------------------------------
+    # Wir verwenden bewusst einen einzigen Handler.
+    # Dadurch prüfen wir selbst, ob die Nachricht Text,
+    # Voice oder Audio enthält.
 
     application.add_handler(
         MessageHandler(
-            filters.TEXT & ~filters.COMMAND,
-            handle_text_message,
-        )
-    )
-
-    # --------------------------------------------------------
-    # SPRACHNACHRICHTEN + AUDIO
-    # --------------------------------------------------------
-
-    application.add_handler(
-        MessageHandler(
-            filters.VOICE | filters.AUDIO,
-            handle_voice_message,
+            filters.ALL,
+            handle_update,
         )
     )
 
@@ -684,16 +818,42 @@ def main():
     # STATUS
     # --------------------------------------------------------
 
-    print("====================================")
-    print("JARVIS ist online.")
-    print("OpenRouter: AKTIV")
-    print("Fish Audio: AKTIV")
-    print("Groq Speech-to-Text: AKTIV")
-    print("Render Web Server: AKTIV")
-    print("Warte auf Telegram-Nachrichten...")
-    print("====================================")
+    print(
+        "===================================="
+    )
 
-    # Telegram starten
+    print(
+        "JARVIS ist online."
+    )
+
+    print(
+        "OpenRouter: AKTIV"
+    )
+
+    print(
+        "Fish Audio: AKTIV"
+    )
+
+    print(
+        "Groq Speech-to-Text: AKTIV"
+    )
+
+    print(
+        "Telegram Voice Handler: AKTIV"
+    )
+
+    print(
+        "Render Web Server: AKTIV"
+    )
+
+    print(
+        "Warte auf Telegram-Nachrichten..."
+    )
+
+    print(
+        "===================================="
+    )
+
     application.run_polling()
 
 
