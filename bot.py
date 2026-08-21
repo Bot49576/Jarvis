@@ -1,11 +1,9 @@
 import os
 import io
-import time
 import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 import requests
-from ddgs import DDGS
 
 from telegram import Update
 from telegram.ext import (
@@ -22,6 +20,7 @@ from telegram.ext import (
 
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+
 FISH_API_KEY = os.getenv("FISH_API_KEY")
 FISH_VOICE_ID = os.getenv("FISH_VOICE_ID")
 
@@ -42,13 +41,18 @@ FISH_URL = (
     "https://api.fish.audio/v1/tts"
 )
 
-# Groq KI
+
+# ============================================================
+# MODELLE
+# ============================================================
+
+# JARVIS KI
 GROQ_MODEL = "openai/gpt-oss-20b"
 
-# Groq Sprache -> Text
+# Sprache -> Text
 GROQ_STT_MODEL = "whisper-large-v3-turbo"
 
-# Fish Audio
+# Text -> Sprache
 FISH_MODEL = "s2.1-pro-free"
 
 
@@ -96,45 +100,73 @@ WISSEN UND EHRLICHKEIT:
 - Sage offen, wenn du etwas nicht weißt.
 - Wenn Informationen fehlen, frage gezielt nach.
 - Trenne bekannte Fakten klar von Vermutungen.
-- Bei aktuellen Informationen sollst du möglichst auf verlässliche
-  Quellen zurückgreifen.
 
 INTERNETRECHERCHE:
 
-- Wenn Liam ausdrücklich recherchieren, suchen oder aktuelle
-  Informationen haben möchte, soll eine Websuche durchgeführt werden.
-- Bei aktuellen Preisen, Nachrichten, Produkten, Softwareversionen,
-  Veröffentlichungen oder Ereignissen soll recherchiert werden.
-- Behaupte niemals, eine Webseite gelesen zu haben, wenn sie nicht
-  tatsächlich über die Recherche gefunden wurde.
-- Erfinde niemals Suchergebnisse oder Quellen.
-- Wenn die Suche keine brauchbaren Ergebnisse liefert, sage das offen.
+Wenn Liam ausdrücklich recherchieren, suchen oder aktuelle
+Informationen haben möchte, MUSST du die Browser-Suche verwenden.
 
-PROBLEMLÖSUNG:
+Das gilt besonders für:
 
-1. Verstehe zuerst das Problem.
-2. Prüfe, welche Informationen vorhanden sind.
-3. Erkenne fehlende Informationen.
-4. Recherchiere, wenn aktuelle oder unbekannte Informationen benötigt werden.
-5. Entwickle einen sinnvollen Plan.
-6. Schlage eine bessere Lösung vor, wenn du eine erkennst.
-7. Gib nicht einfach irgendeine Antwort, nur um etwas zu sagen.
+- aktuelle Preise
+- Produkte und Verfügbarkeit
+- Nachrichten
+- aktuelle Softwareversionen
+- Veröffentlichungen
+- aktuelle Firmeninformationen
+- aktuelle technische Daten
+- aktuelle Termine
+- Personen oder Ereignisse, bei denen sich Informationen ändern können
+
+WICHTIG FÜR RECHERCHEN:
+
+- Die Websuche hat Vorrang vor deinem gespeicherten Wissen.
+- Wenn aktuelle Web-Ergebnisse vorliegen, verwende diese als Grundlage.
+- Behaupte NICHT, etwas sei unveröffentlicht oder nicht verfügbar,
+  wenn die Websuche aktuelle Gegenbelege liefert.
+- Erfinde keine Preise.
+- Erfinde keine Händler.
+- Erfinde keine URLs.
+- Wenn Liam nach Preisen fragt, nenne nur Preise, die tatsächlich
+  aus den recherchierten Ergebnissen hervorgehen.
+- Bei Produktpreisen möglichst Händler, Produktname, Preis und URL nennen.
+- Wenn die Ergebnisse nicht ausreichen, sage offen:
+  "Ich konnte nicht genügend verlässliche Angebote finden."
+- Nutze mehrere Quellen, wenn möglich.
+- Bei widersprüchlichen Preisen weise darauf hin.
+- Wenn eine Quelle offensichtlich veraltet ist, bevorzuge aktuellere Quellen.
+
+Bei einer Preisrecherche sollst du die Antwort möglichst so strukturieren:
+
+1. Händler / Shop
+2. Produkt
+3. Preis
+4. Link
+5. kurzer Hinweis, falls Versand, Variante oder Verfügbarkeit unklar ist
+
+Wenn Liam explizit nach den "drei besten Preisen" fragt,
+liefere genau drei, sofern drei brauchbare Ergebnisse gefunden wurden.
 
 AUTONOMIE:
 
 Du darfst Vorschläge machen.
 
-Du darfst niemals behaupten, dass du Dateien, Systeme,
-Konten oder Geräte verändert oder benutzt hast, wenn du keinen
-tatsächlichen Zugriff darauf hast.
+Du darfst niemals behaupten, dass du eine Datei,
+ein Programm, ein Konto, ein Gerät oder ein anderes System
+verändert oder benutzt hast, wenn du tatsächlich keinen Zugriff darauf hast.
+
+Du darfst niemals so tun, als hättest du eine Handlung ausgeführt,
+wenn du sie nicht wirklich ausführen konntest.
 
 CODE:
 
-- Schreibe verständlichen und robusten Code.
+- Schreibe verständlichen Code.
+- Erzeuge möglichst sicheren und robusten Code.
 - Erkläre komplizierte Dinge verständlich.
 - Verändere deinen eigenen Code nicht eigenmächtig.
-- Wenn eine Änderung an deinem eigenen Code nötig ist,
+- Wenn eine Änderung an deinem eigenen Verhalten oder Code nötig ist,
   beschreibe zuerst, was geändert werden soll.
+- Warte auf Liams Zustimmung, bevor der eigene Code verändert wird.
 
 KONTINUITÄT:
 
@@ -212,7 +244,9 @@ class HealthHandler(BaseHTTPRequestHandler):
 
 def start_web_server():
 
-    port = int(os.getenv("PORT", "10000"))
+    port = int(
+        os.getenv("PORT", "10000")
+    )
 
     server = HTTPServer(
         ("0.0.0.0", port),
@@ -227,155 +261,30 @@ def start_web_server():
 
 
 # ============================================================
-# WEB-SUCHE
-# ============================================================
-
-def internet_suche(query):
-
-    print("====================================")
-    print("WEBRECHERCHE START")
-    print(f"Suchanfrage: {query}")
-    print("====================================")
-
-    try:
-
-        results = list(
-            DDGS().text(
-                query,
-                region="de-de",
-                safesearch="moderate",
-                max_results=3,
-            )
-        )
-
-        if not results:
-
-            print(
-                "Websuche: Keine Ergebnisse gefunden."
-            )
-
-            return []
-
-        clean_results = []
-
-        for result in results:
-
-            title = result.get(
-                "title",
-                ""
-            ).strip()
-
-            url = result.get(
-                "href",
-                ""
-            ).strip()
-
-            body = result.get(
-                "body",
-                ""
-            ).strip()
-
-            # Inhalt bewusst begrenzen
-            body = body[:700]
-
-            if not title and not body:
-                continue
-
-            clean_results.append(
-                {
-                    "title": title,
-                    "url": url,
-                    "body": body,
-                }
-            )
-
-        print(
-            f"Websuche: "
-            f"{len(clean_results)} Ergebnisse gefunden."
-        )
-
-        for index, result in enumerate(
-            clean_results,
-            start=1
-        ):
-
-            print(
-                f"Quelle {index}: "
-                f"{result['title']}"
-            )
-
-            print(
-                f"URL: {result['url']}"
-            )
-
-        print("====================================")
-
-        return clean_results
-
-    except Exception as error:
-
-        print(
-            "WEBRECHERCHE FEHLER"
-        )
-
-        print(
-            f"{type(error).__name__}: {error}"
-        )
-
-        return []
-
-
-def suche_kontext_erstellen(results):
-
-    if not results:
-
-        return None
-
-    parts = []
-
-    for index, result in enumerate(
-        results,
-        start=1
-    ):
-
-        parts.append(
-            f"""
-QUELLE {index}
-Titel: {result.get("title", "")}
-URL: {result.get("url", "")}
-Inhalt: {result.get("body", "")}
-"""
-        )
-
-    context = "\n".join(parts)
-
-    # Zusätzliche Sicherheitsbegrenzung
-    return context[:8000]
-
-
-# ============================================================
-# ENTSCHEIDEN, OB RECHERCHE NÖTIG IST
+# ENTSCHEIDEN, OB WEB-SUCHE NÖTIG IST
 # ============================================================
 
 def soll_recherchieren(text):
 
     text_lower = text.lower()
 
-    suchbegriffe = [
+    direkte_suche = [
         "recherchiere",
         "recherche",
         "such im internet",
         "suche im internet",
         "such online",
         "suche online",
+        "google das",
+        "google bitte",
         "finde heraus",
         "schau im internet",
         "schau online",
-        "prüfe online",
         "prüf online",
+        "prüfe online",
     ]
 
-    aktuelle_begriffe = [
+    aktuelle_themen = [
         "heute",
         "aktuell",
         "aktuelle",
@@ -390,16 +299,23 @@ def soll_recherchieren(text):
         "preis",
         "preise",
         "kostet aktuell",
-        "news",
+        "verfügbar",
+        "verfügbarkeit",
+        "release",
+        "update",
+        "version",
         "nachrichten",
+        "news",
+        "angebot",
+        "angebote",
     ]
 
-    for phrase in suchbegriffe:
+    for phrase in direkte_suche:
 
         if phrase in text_lower:
             return True
 
-    for phrase in aktuelle_begriffe:
+    for phrase in aktuelle_themen:
 
         if phrase in text_lower:
             return True
@@ -409,30 +325,13 @@ def soll_recherchieren(text):
 
 # ============================================================
 # GROQ - JARVIS KI
+# MIT OPTIONALER BROWSER-SUCHE
 # ============================================================
 
 def frage_ki(
     user_text,
-    web_context=None,
+    recherchieren=False,
 ):
-
-    print("====================================")
-    print("GROQ KI START")
-    print(f"Modell: {GROQ_MODEL}")
-    print(
-        f"Recherche-Kontext: "
-        f"{'JA' if web_context else 'NEIN'}"
-    )
-
-    if web_context:
-        print(
-            f"Recherche-Kontext Länge: "
-            f"{len(web_context)} Zeichen"
-        )
-
-    print(
-        "Sende Anfrage an Groq..."
-    )
 
     headers = {
         "Authorization":
@@ -449,47 +348,15 @@ def frage_ki(
 
             "content":
                 SYSTEM_PROMPT,
-        }
-    ]
-
-    if web_context:
-
-        messages.append(
-            {
-                "role":
-                    "system",
-
-                "content":
-                    f"""
-JARVIS HAT WEBRECHERCHE DURCHGEFÜHRT.
-
-Verwende die folgenden Suchergebnisse als Recherchematerial.
-
-WICHTIG:
-
-- Erfinde keine Informationen.
-- Nutze die Suchergebnisse für aktuelle Fakten.
-- Wenn Preise genannt werden, nenne Händler und URL,
-  sofern aus den Ergebnissen erkennbar.
-- Wenn Ergebnisse widersprüchlich sind, erwähne das.
-- Die Suchergebnisse können unvollständig sein.
-
-RECHERCHEERGEBNISSE:
-
-{web_context}
-"""
-            }
-        )
-
-    messages.append(
+        },
         {
             "role":
                 "user",
 
             "content":
                 user_text,
-        }
-    )
+        },
+    ]
 
     data = {
         "model":
@@ -502,16 +369,51 @@ RECHERCHEERGEBNISSE:
             0.7,
 
         "max_completion_tokens":
-            2048,
+            4096,
 
         "stream":
             False,
-
-        "include_reasoning":
-            False,
     }
 
-    start_time = time.time()
+    # --------------------------------------------------------
+    # BROWSER SEARCH
+    # --------------------------------------------------------
+
+    if recherchieren:
+
+        print(
+            "JARVIS: Browser Search wird aktiviert."
+        )
+
+        data["tools"] = [
+            {
+                "type":
+                    "browser_search"
+            }
+        ]
+
+        data["tool_choice"] = "required"
+
+    print(
+        "===================================="
+    )
+
+    print(
+        "GROQ KI START"
+    )
+
+    print(
+        f"Modell: {GROQ_MODEL}"
+    )
+
+    print(
+        f"Browser Search: "
+        f"{'AKTIV' if recherchieren else 'AUS'}"
+    )
+
+    print(
+        "Sende Anfrage an Groq..."
+    )
 
     try:
 
@@ -519,14 +421,7 @@ RECHERCHEERGEBNISSE:
             GROQ_CHAT_URL,
             headers=headers,
             json=data,
-            timeout=120,
-        )
-
-        elapsed = time.time() - start_time
-
-        print(
-            f"Groq Antwort erhalten nach "
-            f"{elapsed:.2f} Sekunden"
+            timeout=180,
         )
 
         print(
@@ -537,34 +432,59 @@ RECHERCHEERGEBNISSE:
         if response.status_code != 200:
 
             print(
-                "GROQ FEHLERANTWORT:"
+                "GROQ FEHLER:"
             )
 
             print(
-                response.text[:4000]
-            )
-
-            print(
-                "===================================="
+                response.text[:5000]
             )
 
             return None
 
         result = response.json()
 
-        print(
-            "Groq JSON erfolgreich gelesen."
+        choices = result.get(
+            "choices",
+            []
         )
 
-        answer = (
-            result["choices"][0]
-            ["message"]["content"]
+        if not choices:
+
+            print(
+                "Groq: Keine choices in Antwort."
+            )
+
+            print(
+                response.text[:5000]
+            )
+
+            return None
+
+        message = choices[0].get(
+            "message",
+            {}
         )
+
+        answer = message.get(
+            "content"
+        )
+
+        # ----------------------------------------------------
+        # MANCHMAL KÖNNEN TOOL-ERGEBNISSE / CONTENT LEER SEIN
+        # ----------------------------------------------------
 
         if not answer:
 
             print(
-                "Groq: Antwort ist leer."
+                "Groq: Keine Textantwort erhalten."
+            )
+
+            print(
+                "Message:"
+            )
+
+            print(
+                message
             )
 
             return None
@@ -583,12 +503,7 @@ RECHERCHEERGEBNISSE:
     except requests.exceptions.Timeout:
 
         print(
-            "GROQ TIMEOUT: "
-            "Keine Antwort innerhalb von 120 Sekunden."
-        )
-
-        print(
-            "===================================="
+            "GROQ TIMEOUT"
         )
 
         return None
@@ -596,15 +511,11 @@ RECHERCHEERGEBNISSE:
     except requests.exceptions.RequestException as error:
 
         print(
-            "GROQ REQUEST FEHLER:"
+            "GROQ REQUEST FEHLER"
         )
 
         print(
             f"{type(error).__name__}: {error}"
-        )
-
-        print(
-            "===================================="
         )
 
         return None
@@ -617,22 +528,18 @@ RECHERCHEERGEBNISSE:
     ) as error:
 
         print(
-            "GROQ ANTWORTFORMAT FEHLER:"
+            "GROQ ANTWORTFEHLER"
         )
 
         print(
             f"{type(error).__name__}: {error}"
         )
 
-        print(
-            "===================================="
-        )
-
         return None
 
 
 # ============================================================
-# GROQ - SPRACHE ZU TEXT
+# GROQ - SPRACHE -> TEXT
 # ============================================================
 
 def sprache_zu_text(
@@ -690,7 +597,7 @@ def sprache_zu_text(
         if response.status_code != 200:
 
             print(
-                response.text[:3000]
+                response.text[:4000]
             )
 
             return None
@@ -730,7 +637,7 @@ def sprache_zu_text(
 
 
 # ============================================================
-# FISH AUDIO - TEXT ZU SPRACHE
+# FISH AUDIO - TEXT -> SPRACHE
 # ============================================================
 
 def text_zu_sprache(text):
@@ -739,8 +646,36 @@ def text_zu_sprache(text):
 
         return None
 
+    if not FISH_API_KEY:
+
+        print(
+            "FISH_API_KEY fehlt."
+        )
+
+        return None
+
+    if not FISH_VOICE_ID:
+
+        print(
+            "FISH_VOICE_ID fehlt."
+        )
+
+        return None
+
     print(
-        "Fish Audio: Starte TTS..."
+        "===================================="
+    )
+
+    print(
+        "FISH AUDIO TTS START"
+    )
+
+    print(
+        f"Modell: {FISH_MODEL}"
+    )
+
+    print(
+        "Voice ID: gesetzt"
     )
 
     headers = {
@@ -782,25 +717,46 @@ def text_zu_sprache(text):
         if response.status_code != 200:
 
             print(
-                "Fish Audio Fehlerantwort:"
+                "FISH AUDIO FEHLER:"
             )
 
             print(
-                response.text[:3000]
+                response.text[:5000]
+            )
+
+            return None
+
+        if not response.content:
+
+            print(
+                "Fish Audio hat eine leere Audiodatei geliefert."
             )
 
             return None
 
         print(
-            "Fish Audio: Audio erfolgreich erzeugt."
+            f"Fish Audio: "
+            f"{len(response.content)} Bytes erhalten."
+        )
+
+        print(
+            "===================================="
         )
 
         return response.content
 
-    except Exception as error:
+    except requests.exceptions.Timeout:
 
         print(
-            "Fish Audio Fehler:"
+            "Fish Audio Timeout"
+        )
+
+        return None
+
+    except requests.exceptions.RequestException as error:
+
+        print(
+            "Fish Audio Netzwerkfehler:"
         )
 
         print(
@@ -811,7 +767,7 @@ def text_zu_sprache(text):
 
 
 # ============================================================
-# ANTWORT SENDEN
+# JARVIS ANTWORT SENDEN
 # ============================================================
 
 async def sende_jarvis_antwort(
@@ -819,10 +775,14 @@ async def sende_jarvis_antwort(
     answer,
 ):
 
+    if not update.message:
+
+        return
+
     if not answer:
 
         await update.message.reply_text(
-            "Meine KI hat gerade keine Antwort geliefert."
+            "Meine KI hat gerade keine verwertbare Antwort geliefert."
         )
 
         return
@@ -850,7 +810,7 @@ async def sende_jarvis_antwort(
     if not audio_data:
 
         print(
-            "JARVIS: Keine Audioantwort."
+            "JARVIS: Keine Audioantwort erzeugt."
         )
 
         return
@@ -868,7 +828,7 @@ async def sende_jarvis_antwort(
     )
 
     print(
-        "JARVIS: Audio gesendet."
+        "JARVIS: Stimme an Telegram gesendet."
     )
 
 
@@ -880,71 +840,27 @@ def verarbeite_text(
     user_text,
 ):
 
-    print("====================================")
+    recherchieren = soll_recherchieren(
+        user_text
+    )
+
     print(
         f"Liam: {user_text}"
     )
 
-    web_context = None
-
-    # --------------------------------------------------------
-    # RECHERCHE
-    # --------------------------------------------------------
-
-    if soll_recherchieren(
-        user_text
-    ):
-
-        print(
-            "JARVIS: Internetrecherche aktiviert."
-        )
-
-        results = internet_suche(
-            user_text
-        )
-
-        if results:
-
-            web_context = (
-                suche_kontext_erstellen(
-                    results
-                )
-            )
-
-            print(
-                "JARVIS: Recherche-Kontext erstellt."
-            )
-
-        else:
-
-            print(
-                "JARVIS: Keine Suchergebnisse."
-            )
-
-    else:
-
-        print(
-            "JARVIS: Keine Websuche nötig."
-        )
-
-    # --------------------------------------------------------
-    # GROQ
-    # --------------------------------------------------------
-
-    answer = frage_ki(
-        user_text,
-        web_context,
-    )
-
     print(
-        "===================================="
+        f"Recherche notwendig: "
+        f"{recherchieren}"
     )
 
-    return answer
+    return frage_ki(
+        user_text,
+        recherchieren=recherchieren,
+    )
 
 
 # ============================================================
-# TELEGRAM UPDATE
+# TELEGRAM
 # ============================================================
 
 async def handle_update(
@@ -994,7 +910,8 @@ async def handle_update(
         )
 
         print(
-            "Liam (Voice): Sprachnachricht erhalten."
+            "Liam (Voice): "
+            "Sprachnachricht erhalten."
         )
 
         print(
@@ -1036,6 +953,11 @@ async def handle_update(
 
                 return
 
+            print(
+                f"Liam (transkribiert): "
+                f"{transcribed_text}"
+            )
+
             answer = verarbeite_text(
                 transcribed_text
             )
@@ -1069,7 +991,8 @@ async def handle_update(
     if message.audio:
 
         print(
-            "Liam (Audio): Audiodatei erhalten."
+            "Liam (Audio): "
+            "Audiodatei erhalten."
         )
 
         try:
@@ -1173,7 +1096,7 @@ def main():
         )
 
     # --------------------------------------------------------
-    # RENDER
+    # RENDER HEALTH SERVER
     # --------------------------------------------------------
 
     web_thread = threading.Thread(
@@ -1217,15 +1140,15 @@ def main():
     )
 
     print(
+        "Groq Browser Search: BEREIT"
+    )
+
+    print(
         "Groq Speech-to-Text: AKTIV"
     )
 
     print(
         "Fish Audio: AKTIV"
-    )
-
-    print(
-        "Websuche: AKTIV"
     )
 
     print(
