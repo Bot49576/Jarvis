@@ -21,6 +21,7 @@ TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
 FISH_API_KEY = os.getenv("FISH_API_KEY")
 FISH_VOICE_ID = os.getenv("FISH_VOICE_ID")
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 
 
 # ============================================================
@@ -29,12 +30,16 @@ FISH_VOICE_ID = os.getenv("FISH_VOICE_ID")
 
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 FISH_URL = "https://api.fish.audio/v1/tts"
+GROQ_STT_URL = "https://api.groq.com/openai/v1/audio/transcriptions"
 
-# Kostenloses OpenRouter-Modell
+# OpenRouter
 OPENROUTER_MODEL = "openai/gpt-oss-20b:free"
 
-# Kostenloses Fish-Audio-Modell
+# Fish Audio
 FISH_MODEL = "s2.1-pro-free"
+
+# Groq Speech-to-Text
+GROQ_STT_MODEL = "whisper-large-v3-turbo"
 
 
 # ============================================================
@@ -160,19 +165,23 @@ Liam ist dein Partner.
 class HealthHandler(BaseHTTPRequestHandler):
 
     def do_GET(self):
+
         if self.path in ("/", "/health"):
 
             body = b"JARVIS is online."
 
             self.send_response(200)
+
             self.send_header(
                 "Content-Type",
                 "text/plain; charset=utf-8"
             )
+
             self.send_header(
                 "Content-Length",
                 str(len(body))
             )
+
             self.end_headers()
 
             self.wfile.write(body)
@@ -182,14 +191,17 @@ class HealthHandler(BaseHTTPRequestHandler):
             body = b"Not Found"
 
             self.send_response(404)
+
             self.send_header(
                 "Content-Type",
                 "text/plain; charset=utf-8"
             )
+
             self.send_header(
                 "Content-Length",
                 str(len(body))
             )
+
             self.end_headers()
 
             self.wfile.write(body)
@@ -216,7 +228,7 @@ def start_web_server():
 # OPENROUTER - KI ANTWORT
 # ============================================================
 
-def frage_ki(user_text: str) -> str:
+def frage_ki(user_text):
 
     headers = {
         "Authorization": f"Bearer {OPENROUTER_API_KEY}",
@@ -282,14 +294,89 @@ def frage_ki(user_text: str) -> str:
 
 
 # ============================================================
+# GROQ - SPRACHE ZU TEXT
+# ============================================================
+
+def sprache_zu_text(audio_bytes, file_name="voice.ogg", mime_type="audio/ogg"):
+
+    headers = {
+        "Authorization": f"Bearer {GROQ_API_KEY}",
+    }
+
+    files = {
+        "file": (
+            file_name,
+            audio_bytes,
+            mime_type,
+        ),
+    }
+
+    data = {
+        "model": GROQ_STT_MODEL,
+        "language": "de",
+        "response_format": "json",
+        "temperature": "0",
+    }
+
+    try:
+
+        response = requests.post(
+            GROQ_STT_URL,
+            headers=headers,
+            files=files,
+            data=data,
+            timeout=120,
+        )
+
+        if response.status_code != 200:
+
+            print(
+                f"Groq Fehler {response.status_code}: "
+                f"{response.text}"
+            )
+
+            return None
+
+        result = response.json()
+
+        text = result.get("text", "").strip()
+
+        if not text:
+
+            print("Groq: Keine Sprache erkannt.")
+
+            return None
+
+        print(f"Groq Transkript: {text}")
+
+        return text
+
+    except requests.exceptions.Timeout:
+
+        print("Groq Timeout")
+
+        return None
+
+    except requests.exceptions.RequestException as error:
+
+        print(f"Groq Netzwerkfehler: {error}")
+
+        return None
+
+    except (KeyError, TypeError, ValueError) as error:
+
+        print(f"Groq Antwortfehler: {error}")
+
+        return None
+
+
+# ============================================================
 # FISH AUDIO - TEXT ZU SPRACHE
 # ============================================================
 
-def text_zu_sprache(text: str):
+def text_zu_sprache(text):
 
-    # WICHTIG:
-    # Das Modell "s2.1-pro-free" gehört in den HEADER.
-    # Fish Audio dokumentiert genau diese Struktur.
+    # Das Fish-Modell gehört in den HEADER.
 
     headers = {
         "Authorization": f"Bearer {FISH_API_KEY}",
@@ -313,10 +400,12 @@ def text_zu_sprache(text: str):
         )
 
         if response.status_code != 200:
+
             print(
                 f"Fish Audio Fehler {response.status_code}: "
                 f"{response.text}"
             )
+
             return None
 
         return response.content
@@ -335,12 +424,12 @@ def text_zu_sprache(text: str):
 
 
 # ============================================================
-# TELEGRAM NACHRICHTEN
+# TEXT-NACHRICHTEN
 # ============================================================
 
-async def handle_message(
-    update: Update,
-    context: ContextTypes.DEFAULT_TYPE,
+async def handle_text_message(
+    update,
+    context,
 ):
 
     if not update.message:
@@ -351,26 +440,17 @@ async def handle_message(
     if not user_text:
         return
 
-    print(f"Liam: {user_text}")
+    print(f"Liam (Text): {user_text}")
 
-    # ========================================================
-    # 1. KI-ANTWORT
-    # ========================================================
-
+    # KI
     answer = frage_ki(user_text)
 
     print(f"JARVIS: {answer}")
 
-    # ========================================================
-    # 2. TEXT AN TELEGRAM
-    # ========================================================
-
+    # Text an Telegram
     await update.message.reply_text(answer)
 
-    # ========================================================
-    # 3. FISH AUDIO
-    # ========================================================
-
+    # Stimme erzeugen
     audio_data = text_zu_sprache(answer)
 
     if not audio_data:
@@ -381,10 +461,7 @@ async def handle_message(
 
         return
 
-    # ========================================================
-    # 4. AUDIO AN TELEGRAM
-    # ========================================================
-
+    # Audio senden
     audio_file = io.BytesIO(audio_data)
 
     audio_file.name = "jarvis.mp3"
@@ -397,16 +474,154 @@ async def handle_message(
 
 
 # ============================================================
+# SPRACHNACHRICHTEN
+# ============================================================
+
+async def handle_voice_message(
+    update,
+    context,
+):
+
+    if not update.message:
+        return
+
+    voice = update.message.voice
+    audio = update.message.audio
+
+    # Nur Voice oder Audio verarbeiten
+    if not voice and not audio:
+        return
+
+    print("Liam (Voice): Sprachnachricht erhalten.")
+
+    try:
+
+        # ----------------------------------------------------
+        # TELEGRAM-DATEI IDENTIFIZIEREN
+        # ----------------------------------------------------
+
+        if voice:
+
+            file_id = voice.file_id
+            file_name = "voice.ogg"
+            mime_type = "audio/ogg"
+
+        else:
+
+            file_id = audio.file_id
+            file_name = audio.file_name or "audio.mp3"
+            mime_type = audio.mime_type or "audio/mpeg"
+
+        # ----------------------------------------------------
+        # AUDIO VON TELEGRAM HERUNTERLADEN
+        # ----------------------------------------------------
+
+        telegram_file = await context.bot.get_file(
+            file_id
+        )
+
+        audio_bytes = bytes(
+            await telegram_file.download_as_bytearray()
+        )
+
+        print(
+            f"Audio heruntergeladen: "
+            f"{len(audio_bytes)} Bytes"
+        )
+
+        # ----------------------------------------------------
+        # GROQ: SPRACHE -> TEXT
+        # ----------------------------------------------------
+
+        transcribed_text = sprache_zu_text(
+            audio_bytes,
+            file_name,
+            mime_type,
+        )
+
+        if not transcribed_text:
+
+            await update.message.reply_text(
+                "Ich konnte deine Sprachnachricht nicht verstehen."
+            )
+
+            return
+
+        print(
+            f"Liam (transkribiert): "
+            f"{transcribed_text}"
+        )
+
+        # ----------------------------------------------------
+        # OPENROUTER: TEXT -> JARVIS
+        # ----------------------------------------------------
+
+        answer = frage_ki(
+            transcribed_text
+        )
+
+        print(f"JARVIS: {answer}")
+
+        # ----------------------------------------------------
+        # TEXTANTWORT
+        # ----------------------------------------------------
+
+        await update.message.reply_text(answer)
+
+        # ----------------------------------------------------
+        # FISH AUDIO: TEXT -> STIMME
+        # ----------------------------------------------------
+
+        audio_data = text_zu_sprache(answer)
+
+        if not audio_data:
+
+            print(
+                "Fish Audio konnte keine Audiodatei erzeugen."
+            )
+
+            return
+
+        # ----------------------------------------------------
+        # JARVIS-STIMME AN TELEGRAM
+        # ----------------------------------------------------
+
+        audio_file = io.BytesIO(audio_data)
+
+        audio_file.name = "jarvis.mp3"
+
+        await update.message.reply_audio(
+            audio=audio_file,
+            title="JARVIS",
+            performer="JARVIS",
+        )
+
+    except Exception as error:
+
+        print(
+            f"Fehler bei Voice-Nachricht: {error}"
+        )
+
+        await update.message.reply_text(
+            "Bei der Verarbeitung deiner "
+            "Sprachnachricht ist etwas schiefgelaufen."
+        )
+
+
+# ============================================================
 # BOT STARTEN
 # ============================================================
 
 def main():
+
+    # Alle benötigten Environment Variables prüfen
 
     required_variables = {
         "TELEGRAM_TOKEN": TELEGRAM_TOKEN,
         "OPENROUTER_API_KEY": OPENROUTER_API_KEY,
         "FISH_API_KEY": FISH_API_KEY,
         "FISH_VOICE_ID": FISH_VOICE_ID,
+        "GROQ_API_KEY": GROQ_API_KEY,
     }
 
     missing = [
@@ -422,9 +637,9 @@ def main():
             + ", ".join(missing)
         )
 
-    # ========================================================
+    # --------------------------------------------------------
     # RENDER WEB SERVER
-    # ========================================================
+    # --------------------------------------------------------
 
     web_thread = threading.Thread(
         target=start_web_server,
@@ -433,9 +648,9 @@ def main():
 
     web_thread.start()
 
-    # ========================================================
+    # --------------------------------------------------------
     # TELEGRAM BOT
-    # ========================================================
+    # --------------------------------------------------------
 
     application = (
         Application.builder()
@@ -443,21 +658,42 @@ def main():
         .build()
     )
 
+    # --------------------------------------------------------
+    # TEXT-NACHRICHTEN
+    # --------------------------------------------------------
+
     application.add_handler(
         MessageHandler(
             filters.TEXT & ~filters.COMMAND,
-            handle_message,
+            handle_text_message,
         )
     )
+
+    # --------------------------------------------------------
+    # SPRACHNACHRICHTEN + AUDIO
+    # --------------------------------------------------------
+
+    application.add_handler(
+        MessageHandler(
+            filters.VOICE | filters.AUDIO,
+            handle_voice_message,
+        )
+    )
+
+    # --------------------------------------------------------
+    # STATUS
+    # --------------------------------------------------------
 
     print("====================================")
     print("JARVIS ist online.")
     print("OpenRouter: AKTIV")
     print("Fish Audio: AKTIV")
+    print("Groq Speech-to-Text: AKTIV")
     print("Render Web Server: AKTIV")
     print("Warte auf Telegram-Nachrichten...")
     print("====================================")
 
+    # Telegram starten
     application.run_polling()
 
 
