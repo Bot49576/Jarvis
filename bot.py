@@ -1,14 +1,14 @@
 import asyncio
+import hashlib
+import hmac
 import html
 import io
 import json
 import os
 import re
-import threading
 import time
 from dataclasses import dataclass, field
 from datetime import datetime
-from http.server import BaseHTTPRequestHandler, HTTPServer
 
 import psycopg
 import requests
@@ -25,6 +25,9 @@ FISH_API_KEY = os.getenv("FISH_API_KEY")
 FISH_VOICE_ID = os.getenv("FISH_VOICE_ID")
 DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
 ALLOWED_TELEGRAM_USER_ID = os.getenv("ALLOWED_TELEGRAM_USER_ID", "").strip()
+WEBHOOK_BASE_URL = os.getenv(
+    "WEBHOOK_BASE_URL", os.getenv("RENDER_EXTERNAL_URL", "")
+).strip()
 LIAM_BASE_PROFILE = os.getenv(
     "LIAM_BASE_PROFILE",
     """
@@ -56,6 +59,7 @@ MAX_SOURCES = 3
 MAX_SPEECH_CHARS = 700
 MAX_SPEECH_SENTENCES = 4
 GEMINI_RETRY_DELAY_SECONDS = 0.75
+TELEGRAM_WEBHOOK_PATH = "telegram/webhook"
 
 
 SYSTEM_PROMPT = """
@@ -257,6 +261,22 @@ def get_chat_lock(chat_id: int) -> asyncio.Lock:
 
 def clean_text(text: str) -> str:
     return " ".join(text.strip().split())[:MAX_MESSAGE_CHARS]
+
+
+def build_webhook_url(base_url: str) -> str:
+    normalized = base_url.strip().rstrip("/")
+    if not normalized.startswith("https://"):
+        raise ValueError("Die öffentliche Webhook-Adresse muss mit https:// beginnen.")
+    return f"{normalized}/{TELEGRAM_WEBHOOK_PATH}"
+
+
+def webhook_secret(token: str) -> str:
+    """Erzeugt einen stabilen Telegram-Webhook-Schutzwert, ohne den Bot-Token offenzulegen."""
+    return hmac.new(
+        token.encode("utf-8"),
+        b"liam-jarvis-telegram-webhook-v1",
+        hashlib.sha256,
+    ).hexdigest()
 
 
 def wants_web_search(text: str) -> bool:
@@ -885,34 +905,6 @@ async def handle_update(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         await update.message.reply_text("Spracheingabe ist noch nicht aktiviert. Text funktioniert bereits.")
 
 
-class HealthHandler(BaseHTTPRequestHandler):
-    def do_GET(self):
-        if self.path not in ("/", "/health"):
-            self.send_response(404)
-            self.end_headers()
-            return
-        body = json.dumps(
-            {
-                "status": "ok",
-                "service": "jarvis",
-                "memory": "neon" if memory_store.persistent else "ram",
-            }
-        ).encode("utf-8")
-        self.send_response(200)
-        self.send_header("Content-Type", "application/json; charset=utf-8")
-        self.send_header("Content-Length", str(len(body)))
-        self.end_headers()
-        self.wfile.write(body)
-
-    def log_message(self, format, *args):
-        return
-
-
-def start_web_server() -> None:
-    port = int(os.getenv("PORT", "10000"))
-    HTTPServer(("0.0.0.0", port), HealthHandler).serve_forever()
-
-
 def main() -> None:
     required = {
         "TELEGRAM_TOKEN": TELEGRAM_TOKEN,
@@ -924,8 +916,14 @@ def main() -> None:
     if missing:
         raise RuntimeError("Fehlende Environment Variables: " + ", ".join(missing))
 
+    try:
+        public_webhook_url = build_webhook_url(WEBHOOK_BASE_URL)
+    except ValueError as error:
+        raise RuntimeError(
+            "WEBHOOK_BASE_URL oder RENDER_EXTERNAL_URL fehlt bzw. ist ungültig."
+        ) from error
+
     memory_store.initialize()
-    threading.Thread(target=start_web_server, daemon=True).start()
 
     application = Application.builder().token(TELEGRAM_TOKEN).build()
     application.add_handler(MessageHandler(filters.ALL, handle_update))
@@ -936,7 +934,17 @@ def main() -> None:
     print("Google Search: bedarfsgesteuert")
     print("Fish Audio: aktiv; mit /voice off abschaltbar")
     print("Spracheingabe: noch deaktiviert")
-    application.run_polling()
+    print("Telegram: sicherer Webhook aktiv")
+    application.run_webhook(
+        listen="0.0.0.0",
+        port=int(os.getenv("PORT", "10000")),
+        url_path=TELEGRAM_WEBHOOK_PATH,
+        webhook_url=public_webhook_url,
+        secret_token=webhook_secret(TELEGRAM_TOKEN),
+        bootstrap_retries=5,
+        drop_pending_updates=False,
+        max_connections=4,
+    )
 
 
 if __name__ == "__main__":

@@ -8,6 +8,7 @@ from bot import (
     ChatMemory,
     LIAM_BASE_PROFILE,
     MemoryStore,
+    build_webhook_url,
     forget_command,
     history_contents,
     interaction_input,
@@ -26,6 +27,7 @@ from bot import (
     without_source_section,
     wants_deeper_thinking,
     wants_web_search,
+    webhook_secret,
 )
 
 
@@ -43,6 +45,21 @@ class JarvisLogicTests(unittest.TestCase):
     def test_deeper_thinking_is_explicit(self):
         self.assertTrue(wants_deeper_thinking("Denk gründlich darüber nach"))
         self.assertFalse(wants_deeper_thinking("Wie spät ist es?"))
+
+    def test_webhook_url_uses_https_and_fixed_path(self):
+        self.assertEqual(
+            build_webhook_url("https://jarvis.example/"),
+            "https://jarvis.example/telegram/webhook",
+        )
+        with self.assertRaises(ValueError):
+            build_webhook_url("http://jarvis.example")
+
+    def test_webhook_secret_is_stable_and_does_not_expose_token(self):
+        token = "123456:very-secret-token"
+        secret = webhook_secret(token)
+        self.assertEqual(secret, webhook_secret(token))
+        self.assertEqual(len(secret), 64)
+        self.assertNotIn(token, secret)
 
     def test_remember_and_forget_commands(self):
         self.assertEqual(remember_command("Merk dir: Mein Lieblingsspiel ist Minecraft"),
