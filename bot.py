@@ -4,7 +4,6 @@ import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 import requests
-from ddgs import DDGS
 from google import genai
 from google.genai import types
 
@@ -22,6 +21,7 @@ from telegram.ext import (
 # ============================================================
 
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
+
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
 FISH_API_KEY = os.getenv("FISH_API_KEY")
@@ -32,15 +32,13 @@ FISH_VOICE_ID = os.getenv("FISH_VOICE_ID")
 # MODELLE
 # ============================================================
 
-# DAS NEUE JARVIS-GEHIRN
 GEMINI_MODEL = "gemini-3.5-flash-lite"
 
-# JARVIS-STIMME
 FISH_MODEL = "s2.1-pro-free"
 
 
 # ============================================================
-# API-ENDPUNKT FISH AUDIO
+# FISH AUDIO
 # ============================================================
 
 FISH_URL = "https://api.fish.audio/v1/tts"
@@ -116,8 +114,8 @@ EHRLICHKEIT
 RECHERCHE
 
 Wenn Liam ausdrücklich recherchieren, online suchen, im Internet
-nachsehen oder aktuelle Informationen haben möchte, soll eine
-Webrecherche durchgeführt werden.
+nachsehen oder aktuelle Informationen haben möchte, soll die
+Google-Suche verwendet werden.
 
 Das gilt besonders für:
 
@@ -135,7 +133,7 @@ Das gilt besonders für:
 
 WICHTIG:
 
-Aktuelle Rechercheergebnisse haben Vorrang vor altem Wissen.
+Aktuelle Suchergebnisse haben Vorrang vor deinem alten Wissen.
 
 Wenn eine aktuelle Quelle zeigt, dass etwas veröffentlicht,
 verfügbar oder anders als früher ist, verwende die aktuellen
@@ -156,7 +154,7 @@ Wenn Liam Preise verlangt:
 - nenne den Händler
 - nenne das Produkt
 - nenne den Preis
-- nenne die URL
+- nenne den Link
 - erwähne wichtige Einschränkungen wie Verfügbarkeit oder Variante,
   wenn diese aus den Suchergebnissen hervorgehen
 
@@ -170,8 +168,10 @@ Wenn Suchergebnisse widersprüchlich sind, weise darauf hin.
 
 QUELLEN
 
-Wenn Webrecherche verwendet wurde, soll JARVIS nach Möglichkeit
-die verwendeten Quellen bzw. Links nennen.
+Wenn eine Webrecherche durchgeführt wurde, verwende die gefundenen
+Quellen als Grundlage deiner Antwort.
+
+Nenne relevante Quellen oder Links nach Möglichkeit am Ende der Antwort.
 
 AUTONOMIE
 
@@ -275,7 +275,7 @@ def start_web_server():
 
 
 # ============================================================
-# ENTSCHEIDEN, OB WEBRECHERCHE NÖTIG IST
+# ENTSCHEIDEN, OB RECHERCHE NÖTIG IST
 # ============================================================
 
 def soll_recherchieren(text):
@@ -297,6 +297,8 @@ def soll_recherchieren(text):
         "schau online",
         "prüf online",
         "prüfe online",
+        "nachschauen",
+        "nachschauen im internet",
     ]
 
     aktuelle_begriffe = [
@@ -341,161 +343,23 @@ def soll_recherchieren(text):
 
 
 # ============================================================
-# INTERNETRECHERCHE
+# GOOGLE SEARCH TOOL
 # ============================================================
 
-def internet_suche(query):
+def google_search_tool():
 
-    print(
-        "===================================="
+    return types.Tool(
+        google_search=types.GoogleSearch()
     )
-
-    print(
-        "WEBRECHERCHE START"
-    )
-
-    print(
-        f"Suchanfrage: {query}"
-    )
-
-    try:
-
-        results = list(
-            DDGS().text(
-                query,
-                region="de-de",
-                safesearch="moderate",
-                max_results=5,
-            )
-        )
-
-        if not results:
-
-            print(
-                "Websuche: Keine Ergebnisse."
-            )
-
-            return []
-
-        clean_results = []
-
-        for result in results:
-
-            title = result.get(
-                "title",
-                ""
-            ).strip()
-
-            url = result.get(
-                "href",
-                ""
-            ).strip()
-
-            body = result.get(
-                "body",
-                ""
-            ).strip()
-
-            # Snippet begrenzen
-            body = body[:900]
-
-            if not title and not body:
-                continue
-
-            clean_results.append(
-                {
-                    "title": title,
-                    "url": url,
-                    "body": body,
-                }
-            )
-
-        print(
-            f"Websuche: "
-            f"{len(clean_results)} Ergebnisse."
-        )
-
-        for index, result in enumerate(
-            clean_results,
-            start=1
-        ):
-
-            print(
-                f"Quelle {index}: "
-                f"{result['title']}"
-            )
-
-            print(
-                f"URL: {result['url']}"
-            )
-
-        print(
-            "===================================="
-        )
-
-        return clean_results
-
-    except Exception as error:
-
-        print(
-            "Websuche Fehler:"
-        )
-
-        print(
-            f"{type(error).__name__}: {error}"
-        )
-
-        return []
 
 
 # ============================================================
-# RECHERCHEMATERIAL FÜR GEMINI
-# ============================================================
-
-def recherchematerial_erstellen(
-    results
-):
-
-    if not results:
-        return None
-
-    parts = []
-
-    for index, result in enumerate(
-        results,
-        start=1
-    ):
-
-        parts.append(
-            f"""
-QUELLE {index}
-
-Titel:
-{result.get("title", "")}
-
-URL:
-{result.get("url", "")}
-
-Suchauszug:
-{result.get("body", "")}
-"""
-        )
-
-    material = "\n".join(
-        parts
-    )
-
-    # Begrenzen, damit die Anfrage nicht unnötig groß wird.
-    return material[:9000]
-
-
-# ============================================================
-# GEMINI - JARVIS
+# GEMINI
 # ============================================================
 
 def frage_gemini(
     user_text,
-    web_context=None
+    recherchieren=False,
 ):
 
     print(
@@ -511,58 +375,33 @@ def frage_gemini(
     )
 
     print(
-        f"Webrecherche: "
-        f"{'JA' if web_context else 'NEIN'}"
-    )
-
-    prompt_parts = [
-        user_text
-    ]
-
-    # --------------------------------------------------------
-    # RECHERCHEERGEBNISSE
-    # --------------------------------------------------------
-
-    if web_context:
-
-        prompt_parts.append(
-            """
-
-============================================================
-AKTUELLE WEBRECHERCHE
-============================================================
-
-Die folgenden Ergebnisse stammen aus einer aktuellen Websuche.
-
-WICHTIGE REGELN:
-
-- Diese aktuellen Ergebnisse haben Vorrang vor deinem alten Wissen.
-- Erfinde keine Informationen.
-- Erfinde keine Preise.
-- Erfinde keine Händler.
-- Erfinde keine URLs.
-- Verwende nur Informationen, die durch die Recherche gestützt werden.
-- Wenn Quellen widersprüchlich sind, erwähne das.
-- Wenn die Informationen nicht ausreichen, sage das offen.
-
-Bei Preisvergleichen:
-
-1. Händler
-2. Produkt
-3. Preis
-4. Link
-
-RECHERCHEERGEBNISSE:
-
-"""
-            + web_context
-        )
-
-    full_prompt = "\n\n".join(
-        prompt_parts
+        f"Google Search: "
+        f"{'AKTIV' if recherchieren else 'AUS'}"
     )
 
     try:
+
+        config_kwargs = {
+            "system_instruction": SYSTEM_PROMPT,
+        }
+
+        # ----------------------------------------------------
+        # GOOGLE SEARCH GROUNDING
+        # ----------------------------------------------------
+
+        if recherchieren:
+
+            config_kwargs["tools"] = [
+                google_search_tool()
+            ]
+
+            print(
+                "Google Search Grounding aktiviert."
+            )
+
+        # ----------------------------------------------------
+        # GEMINI ANFRAGE
+        # ----------------------------------------------------
 
         response = (
             gemini_client
@@ -570,22 +409,24 @@ RECHERCHEERGEBNISSE:
             .generate_content(
                 model=GEMINI_MODEL,
 
-                contents=full_prompt,
+                contents=user_text,
 
                 config=types.GenerateContentConfig(
-                    system_instruction=SYSTEM_PROMPT,
-
-                    max_output_tokens=2048,
+                    **config_kwargs
                 ),
             )
         )
+
+        # ----------------------------------------------------
+        # TEXTANTWORT
+        # ----------------------------------------------------
 
         answer = response.text
 
         if not answer:
 
             print(
-                "Gemini: Leere Antwort."
+                "Gemini: Keine Textantwort."
             )
 
             print(
@@ -598,6 +439,63 @@ RECHERCHEERGEBNISSE:
             f"Gemini Antwort: "
             f"{len(answer)} Zeichen"
         )
+
+        # ----------------------------------------------------
+        # GROUNDING-INFORMATIONEN INS LOG
+        # ----------------------------------------------------
+
+        if recherchieren:
+
+            try:
+
+                candidates = (
+                    response.candidates
+                    or []
+                )
+
+                if candidates:
+
+                    grounding = getattr(
+                        candidates[0],
+                        "grounding_metadata",
+                        None
+                    )
+
+                    if grounding:
+
+                        print(
+                            "Google Search Grounding: "
+                            "Metadaten vorhanden."
+                        )
+
+                        queries = getattr(
+                            grounding,
+                            "web_search_queries",
+                            None
+                        )
+
+                        if queries:
+
+                            print(
+                                "Suchanfragen:"
+                            )
+
+                            for query in queries:
+
+                                print(
+                                    f"- {query}"
+                                )
+
+            except Exception as grounding_error:
+
+                print(
+                    "Grounding-Metadaten konnten "
+                    "nicht vollständig gelesen werden:"
+                )
+
+                print(
+                    grounding_error
+                )
 
         return answer.strip()
 
@@ -612,7 +510,13 @@ RECHERCHEERGEBNISSE:
         )
 
         print(
-            f"{type(error).__name__}: {error}"
+            f"Fehlertyp: "
+            f"{type(error).__name__}"
+        )
+
+        print(
+            f"Fehler: "
+            f"{error}"
         )
 
         print(
@@ -631,6 +535,7 @@ def text_zu_sprache(
 ):
 
     if not text:
+
         return None
 
     if not FISH_API_KEY:
@@ -736,7 +641,8 @@ def text_zu_sprache(
         )
 
         print(
-            f"{type(error).__name__}: {error}"
+            f"{type(error).__name__}: "
+            f"{error}"
         )
 
         return None
@@ -752,6 +658,7 @@ async def sende_jarvis_antwort(
 ):
 
     if not update.message:
+
         return
 
     if not answer:
@@ -776,7 +683,7 @@ async def sende_jarvis_antwort(
     )
 
     # --------------------------------------------------------
-    # STIMME
+    # FISH AUDIO
     # --------------------------------------------------------
 
     audio_data = text_zu_sprache(
@@ -817,8 +724,10 @@ async def verarbeite_text(
     user_text
 ):
 
-    recherchieren = soll_recherchieren(
-        user_text
+    recherchieren = (
+        soll_recherchieren(
+            user_text
+        )
     )
 
     print(
@@ -834,23 +743,9 @@ async def verarbeite_text(
         f"{recherchieren}"
     )
 
-    web_context = None
-
-    if recherchieren:
-
-        results = internet_suche(
-            user_text
-        )
-
-        web_context = (
-            recherchematerial_erstellen(
-                results
-            )
-        )
-
     answer = frage_gemini(
         user_text,
-        web_context=web_context
+        recherchieren=recherchieren,
     )
 
     await sende_jarvis_antwort(
@@ -869,6 +764,7 @@ async def handle_update(
 ):
 
     if not update.message:
+
         return
 
     message = update.message
@@ -884,6 +780,7 @@ async def handle_update(
         )
 
         if not user_text:
+
             return
 
         await verarbeite_text(
@@ -941,7 +838,7 @@ def main():
         )
 
     # --------------------------------------------------------
-    # RENDER
+    # RENDER HEALTH SERVER
     # --------------------------------------------------------
 
     web_thread = threading.Thread(
@@ -952,7 +849,7 @@ def main():
     web_thread.start()
 
     # --------------------------------------------------------
-    # TELEGRAM
+    # TELEGRAM BOT
     # --------------------------------------------------------
 
     application = (
@@ -985,11 +882,11 @@ def main():
     )
 
     print(
-        "Fish Audio: AKTIV"
+        "Google Search Grounding: BEREIT"
     )
 
     print(
-        "Websuche: AKTIV"
+        "Fish Audio: AKTIV"
     )
 
     print(
@@ -998,6 +895,10 @@ def main():
 
     print(
         "OpenRouter: NICHT VERWENDET"
+    )
+
+    print(
+        "DDGS: NICHT VERWENDET"
     )
 
     print(
