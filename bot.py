@@ -591,7 +591,11 @@ def ask_gemini(
             "\n\nWEBRECHERCHE\n"
             "Beantworte die Frage zuerst direkt und verständlich. Bleibe normalerweise bei "
             "zwei bis vier Sätzen, außer Liam verlangt ausdrücklich eine ausführliche Analyse. "
-            "Bevorzuge offizielle oder andere primäre Quellen. Füge selbst keine Quellenliste, "
+            "Bevorzuge offizielle oder andere primäre Quellen. Bei Wörtern wie 'aktuell', "
+            "'neueste' oder 'Vorabversion' prüfe immer das Veröffentlichungsdatum und wähle "
+            f"den neuesten belegten Stand zum heutigen Datum {datetime.now().date().isoformat()}. "
+            "Eine ältere Antwort im Gesprächsverlauf ist kein Beleg und muss bei Widerspruch "
+            "mit einer aktuelleren offiziellen Quelle korrigiert werden. Füge selbst keine Quellenliste, "
             "keine URLs und keinen Abschnitt mit der Überschrift 'Quellen' hinzu; das System "
             "ergänzt die gefundenen Quellen separat."
         )
