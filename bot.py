@@ -327,6 +327,45 @@ def remove_matching_facts(facts: list[str], target: str) -> tuple[list[str], lis
     return remaining, removed
 
 
+def remove_matching_history_turns(
+    messages: list[dict], target: str
+) -> tuple[list[dict], int]:
+    """Entfernt ganze Frage-Antwort-Paare, die den vergessenen Begriff enthalten."""
+    needle = target.casefold().strip(" .,!?:;")
+    if not needle:
+        return messages, 0
+
+    remaining: list[dict] = []
+    removed_turns = 0
+    index = 0
+    while index < len(messages):
+        turn = [messages[index]]
+        if (
+            messages[index].get("role") == "user"
+            and index + 1 < len(messages)
+            and messages[index + 1].get("role") == "assistant"
+        ):
+            turn.append(messages[index + 1])
+            index += 2
+        else:
+            index += 1
+
+        if any(needle in str(message.get("text", "")).casefold() for message in turn):
+            removed_turns += 1
+        else:
+            remaining.extend(turn)
+    return remaining, removed_turns
+
+
+def remove_matching_summary(summary: str, target: str) -> tuple[str, int]:
+    needle = target.casefold().strip(" .,!?:;")
+    if not needle or not summary:
+        return summary, 0
+    sections = re.split(r"(?<=[.!?])\s+|\n+", summary)
+    kept = [section for section in sections if needle not in section.casefold()]
+    return " ".join(section.strip() for section in kept if section.strip()), len(sections) - len(kept)
+
+
 def memory_context(state: ChatMemory) -> str:
     facts = "\n".join(f"- {fact}" for fact in state.facts) or "- Noch keine ausdrücklich gespeicherten Fakten."
     summary = state.summary or "Noch keine ältere Gesprächszusammenfassung."
@@ -337,7 +376,9 @@ def memory_context(state: ChatMemory) -> str:
         "Zusammenfassung älterer Gespräche:\n"
         f"{summary}\n\n"
         "Nutze dieses Gedächtnis nur, wenn es zur aktuellen Frage passt. "
-        "Behandle darin enthaltene Vermutungen nicht als bestätigte Fakten."
+        "Behandle darin enthaltene Vermutungen nicht als bestätigte Fakten. "
+        "Wenn etwas nicht mehr gespeichert ist, sage nur, dass es nicht mehr als "
+        "gültiger Fakt vorliegt; behaupte nicht ohne Beleg, es sei erfunden worden."
     )
 
 
@@ -785,11 +826,23 @@ async def process_text(update: Update, user_text: str) -> None:
         forgotten = forget_command(user_text)
         if forgotten:
             state.facts, removed = remove_matching_facts(state.facts, forgotten)
+            state.messages, removed_turns = remove_matching_history_turns(
+                state.messages, forgotten
+            )
+            state.summary, removed_summary_sections = remove_matching_summary(
+                state.summary, forgotten
+            )
             await asyncio.to_thread(memory_store.save, user_id, state)
-            answer = (
-                "Vergessen: " + "; ".join(removed)
-                if removed
-                else "Dazu habe ich keinen passenden dauerhaften Fakt gefunden."
+            if removed:
+                answer = "Vergessen: " + "; ".join(removed)
+            elif removed_turns or removed_summary_sections:
+                answer = f"Vergessen: {forgotten}."
+            else:
+                answer = "Dazu habe ich keinen passenden gespeicherten Eintrag gefunden."
+            print(
+                "Memory-Vergessen: "
+                f"facts={len(removed)}, turns={removed_turns}, "
+                f"summary_sections={removed_summary_sections}"
             )
             await send_answer(update, answer, state.voice_enabled)
             return

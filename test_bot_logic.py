@@ -17,6 +17,8 @@ from bot import (
     response_diagnostics,
     remember_command,
     remove_matching_facts,
+    remove_matching_history_turns,
+    remove_matching_summary,
     retry_thinking_level,
     source_message,
     telegram_chunks,
@@ -58,6 +60,33 @@ class JarvisLogicTests(unittest.TestCase):
         loaded = store.load(123)
         self.assertEqual(loaded.summary, "Test")
         self.assertEqual(loaded.facts, ["Liam mag Technik"])
+
+    def test_forgetting_removes_the_complete_matching_history_turn(self):
+        messages = [
+            {"role": "user", "text": "Wie lautet das Testwort?"},
+            {"role": "assistant", "text": "Es lautet Kupferfalke."},
+            {"role": "user", "text": "Was ist zwei plus zwei?"},
+            {"role": "assistant", "text": "Vier."},
+        ]
+        remaining, removed = remove_matching_history_turns(messages, "Kupferfalke")
+        self.assertEqual(removed, 1)
+        self.assertEqual(
+            remaining,
+            [
+                {"role": "user", "text": "Was ist zwei plus zwei?"},
+                {"role": "assistant", "text": "Vier."},
+            ],
+        )
+
+    def test_forgetting_removes_matching_summary_section(self):
+        summary, removed = remove_matching_summary(
+            "Liam mag Pizza. Das Testwort ist Kupferfalke. Liam mag Fußball.",
+            "Kupferfalke",
+        )
+        self.assertEqual(removed, 1)
+        self.assertNotIn("Kupferfalke", summary)
+        self.assertIn("Pizza", summary)
+        self.assertIn("Fußball", summary)
 
     def test_telegram_messages_are_chunked(self):
         chunks = telegram_chunks("A" * 9_000)
