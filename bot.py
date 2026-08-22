@@ -22,10 +22,7 @@ from telegram.ext import (
 # ============================================================
 
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
-
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-
-GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 
 FISH_API_KEY = os.getenv("FISH_API_KEY")
 FISH_VOICE_ID = os.getenv("FISH_VOICE_ID")
@@ -35,27 +32,15 @@ FISH_VOICE_ID = os.getenv("FISH_VOICE_ID")
 # MODELLE
 # ============================================================
 
-# NEUES JARVIS-GEHIRN
 GEMINI_MODEL = "gemini-3.5-flash-lite"
-
-# Sprache -> Text
-GROQ_STT_MODEL = "whisper-large-v3-turbo"
-
-# Text -> Sprache
 FISH_MODEL = "s2.1-pro-free"
 
 
 # ============================================================
-# API-ENDPUNKTE
+# API
 # ============================================================
 
-GROQ_STT_URL = (
-    "https://api.groq.com/openai/v1/audio/transcriptions"
-)
-
-FISH_URL = (
-    "https://api.fish.audio/v1/tts"
-)
+FISH_URL = "https://api.fish.audio/v1/tts"
 
 
 # ============================================================
@@ -128,7 +113,7 @@ EHRLICHKEIT:
 RECHERCHE:
 
 Wenn Liam ausdrücklich recherchieren, online suchen, im Internet
-nachsehen oder aktuelle Informationen haben möchte, soll die
+nachsehen oder aktuelle Informationen haben möchte, soll eine
 Webrecherche durchgeführt werden.
 
 Das gilt besonders für:
@@ -353,7 +338,7 @@ def soll_recherchieren(text):
 
 
 # ============================================================
-# INTERNETRECHERCHE MIT DDGS
+# INTERNETRECHERCHE
 # ============================================================
 
 def internet_suche(query):
@@ -408,7 +393,6 @@ def internet_suche(query):
                 ""
             ).strip()
 
-            # Snippet begrenzen
             body = body[:900]
 
             if not title and not body:
@@ -461,7 +445,7 @@ def internet_suche(query):
 
 
 # ============================================================
-# RECHERCHEKONTEXT
+# RECHERCHEMATERIAL
 # ============================================================
 
 def recherchemaaterial_erstellen(
@@ -493,14 +477,15 @@ Suchauszug:
 """
         )
 
-    material = "\n".join(parts)
+    material = "\n".join(
+        parts
+    )
 
-    # Nicht unnötig groß werden lassen
     return material[:9000]
 
 
 # ============================================================
-# GEMINI - KI
+# GEMINI
 # ============================================================
 
 def frage_gemini(
@@ -525,19 +510,9 @@ def frage_gemini(
         f"{'JA' if web_context else 'NEIN'}"
     )
 
-    prompt_parts = []
-
-    # --------------------------------------------------------
-    # NORMALE NACHRICHT
-    # --------------------------------------------------------
-
-    prompt_parts.append(
+    prompt_parts = [
         user_text
-    )
-
-    # --------------------------------------------------------
-    # RECHERCHEERGEBNISSE
-    # --------------------------------------------------------
+    ]
 
     if web_context:
 
@@ -563,7 +538,6 @@ WICHTIGE REGELN:
 
 Bei Preisvergleichen:
 
-Nenne möglichst:
 1. Händler
 2. Produkt
 3. Preis
@@ -582,16 +556,14 @@ RECHERCHEERGEBNISSE:
     try:
 
         response = (
-            gemini_client.models.generate_content(
+            gemini_client
+            .models
+            .generate_content(
                 model=GEMINI_MODEL,
-
                 contents=full_prompt,
-
                 config=types.GenerateContentConfig(
                     system_instruction=SYSTEM_PROMPT,
-
                     temperature=0.7,
-
                     max_output_tokens=2048,
                 ),
             )
@@ -632,110 +604,7 @@ RECHERCHEERGEBNISSE:
 
 
 # ============================================================
-# GROQ - SPRACHE ZU TEXT
-# ============================================================
-
-def sprache_zu_text(
-    audio_bytes,
-    file_name="voice.ogg",
-    mime_type="audio/ogg",
-):
-
-    headers = {
-        "Authorization":
-            f"Bearer {GROQ_API_KEY}",
-    }
-
-    files = {
-        "file": (
-            file_name,
-            audio_bytes,
-            mime_type,
-        ),
-    }
-
-    data = {
-        "model":
-            GROQ_STT_MODEL,
-
-        "language":
-            "de",
-
-        "response_format":
-            "json",
-
-        "temperature":
-            "0",
-    }
-
-    try:
-
-        print(
-            "Groq STT: "
-            "Transkription startet..."
-        )
-
-        response = requests.post(
-            "https://api.groq.com/openai/v1/audio/transcriptions",
-            headers=headers,
-            files=files,
-            data=data,
-            timeout=120,
-        )
-
-        print(
-            f"Groq STT HTTP Status: "
-            f"{response.status_code}"
-        )
-
-        if response.status_code != 200:
-
-            print(
-                response.text[:4000]
-            )
-
-            return None
-
-        result = response.json()
-
-        text = (
-            result
-            .get("text", "")
-            .strip()
-        )
-
-        if not text:
-
-            print(
-                "Groq STT: "
-                "Keine Sprache erkannt."
-            )
-
-            return None
-
-        print(
-            f"Groq Transkript: "
-            f"{text}"
-        )
-
-        return text
-
-    except Exception as error:
-
-        print(
-            "Groq STT Fehler:"
-        )
-
-        print(
-            f"{type(error).__name__}: "
-            f"{error}"
-        )
-
-        return None
-
-
-# ============================================================
-# FISH AUDIO - TEXT ZU SPRACHE
+# FISH AUDIO
 # ============================================================
 
 def text_zu_sprache(
@@ -847,7 +716,7 @@ def text_zu_sprache(
 
 
 # ============================================================
-# ANTWORT AN TELEGRAM
+# TELEGRAM-ANTWORT
 # ============================================================
 
 async def sende_jarvis_antwort(
@@ -913,7 +782,7 @@ async def sende_jarvis_antwort(
 
 
 # ============================================================
-# TEXT VERARBEITEN
+# NACHRICHT VERARBEITEN
 # ============================================================
 
 async def verarbeite_text(
@@ -964,7 +833,7 @@ async def verarbeite_text(
 
 
 # ============================================================
-# TELEGRAM UPDATE
+# TELEGRAM
 # ============================================================
 
 async def handle_update(
@@ -977,9 +846,9 @@ async def handle_update(
 
     message = update.message
 
-    # ========================================================
+    # --------------------------------------------------------
     # TEXT
-    # ========================================================
+    # --------------------------------------------------------
 
     if message.text:
 
@@ -997,155 +866,17 @@ async def handle_update(
 
         return
 
-    # ========================================================
-    # VOICE
-    # ========================================================
+    # --------------------------------------------------------
+    # VOICE / AUDIO
+    # --------------------------------------------------------
 
-    if message.voice:
+    if message.voice or message.audio:
 
-        print(
-            "===================================="
+        await message.reply_text(
+            "Sprachverarbeitung ist momentan deaktiviert. "
+            "Wir bauen sie später wieder sauber mit einer "
+            "separaten Speech-to-Text-Lösung ein."
         )
-
-        print(
-            "Liam (Voice): "
-            "Sprachnachricht erhalten."
-        )
-
-        try:
-
-            telegram_file = (
-                await context.bot.get_file(
-                    message.voice.file_id
-                )
-            )
-
-            audio_bytes = bytes(
-                await telegram_file
-                .download_as_bytearray()
-            )
-
-            print(
-                f"Voice heruntergeladen: "
-                f"{len(audio_bytes)} Bytes"
-            )
-
-            transcribed_text = (
-                sprache_zu_text(
-                    audio_bytes,
-                    "voice.ogg",
-                    "audio/ogg",
-                )
-            )
-
-            if not transcribed_text:
-
-                await message.reply_text(
-                    "Ich konnte deine "
-                    "Sprachnachricht nicht verstehen."
-                )
-
-                return
-
-            print(
-                f"Liam (Transkript): "
-                f"{transcribed_text}"
-            )
-
-            await verarbeite_text(
-                update,
-                transcribed_text
-            )
-
-        except Exception as error:
-
-            print(
-                "VOICE FEHLER:"
-            )
-
-            print(
-                f"{type(error).__name__}: "
-                f"{error}"
-            )
-
-            await message.reply_text(
-                "Bei der Verarbeitung deiner "
-                "Sprachnachricht ist etwas schiefgelaufen."
-            )
-
-        return
-
-    # ========================================================
-    # AUDIO
-    # ========================================================
-
-    if message.audio:
-
-        print(
-            "Liam (Audio): "
-            "Audiodatei erhalten."
-        )
-
-        try:
-
-            telegram_file = (
-                await context.bot.get_file(
-                    message.audio.file_id
-                )
-            )
-
-            audio_bytes = bytes(
-                await telegram_file
-                .download_as_bytearray()
-            )
-
-            file_name = (
-                message.audio.file_name
-                or "audio.mp3"
-            )
-
-            mime_type = (
-                message.audio.mime_type
-                or "audio/mpeg"
-            )
-
-            transcribed_text = (
-                sprache_zu_text(
-                    audio_bytes,
-                    file_name,
-                    mime_type
-                )
-            )
-
-            if not transcribed_text:
-
-                await message.reply_text(
-                    "Ich konnte die "
-                    "Audiodatei nicht verstehen."
-                )
-
-                return
-
-            await verarbeite_text(
-                update,
-                transcribed_text
-            )
-
-        except Exception as error:
-
-            print(
-                "AUDIO FEHLER:"
-            )
-
-            print(
-                f"{type(error).__name__}: "
-                f"{error}"
-            )
-
-            await message.reply_text(
-                "Bei der Verarbeitung der "
-                "Audiodatei ist etwas schiefgelaufen."
-            )
 
         return
 
@@ -1162,9 +893,6 @@ def main():
 
         "GEMINI_API_KEY":
             GEMINI_API_KEY,
-
-        "GROQ_API_KEY":
-            GROQ_API_KEY,
 
         "FISH_API_KEY":
             FISH_API_KEY,
@@ -1232,15 +960,15 @@ def main():
     )
 
     print(
-        "Groq Speech-to-Text: AKTIV"
-    )
-
-    print(
         "Fish Audio: AKTIV"
     )
 
     print(
         "Websuche: AKTIV"
+    )
+
+    print(
+        "Groq: NICHT VERWENDET"
     )
 
     print(
