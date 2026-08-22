@@ -4,6 +4,7 @@ import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 import requests
+from groq import Groq
 
 from telegram import Update
 from telegram.ext import (
@@ -26,12 +27,8 @@ FISH_VOICE_ID = os.getenv("FISH_VOICE_ID")
 
 
 # ============================================================
-# API-ENDPUNKTE
+# API-EINSTELLUNGEN
 # ============================================================
-
-GROQ_CHAT_URL = (
-    "https://api.groq.com/openai/v1/chat/completions"
-)
 
 GROQ_STT_URL = (
     "https://api.groq.com/openai/v1/audio/transcriptions"
@@ -49,6 +46,15 @@ FISH_URL = (
 GROQ_MODEL = "openai/gpt-oss-20b"
 GROQ_STT_MODEL = "whisper-large-v3-turbo"
 FISH_MODEL = "s2.1-pro-free"
+
+
+# ============================================================
+# GROQ CLIENT
+# ============================================================
+
+groq_client = Groq(
+    api_key=GROQ_API_KEY
+)
 
 
 # ============================================================
@@ -75,13 +81,14 @@ Behandle Liam als Partner.
 Verwende keine unnötigen Floskeln wie:
 "Gute Frage!"
 "Das ist eine interessante Frage!"
-"Ich helfe dir gerne!"
+"Ich helfe dir gerne dabei!"
 
 Komm direkt zum Punkt.
 
 Denke mit.
 Wenn eine bessere Lösung existiert, schlage sie vor.
-Du darfst Liam widersprechen, wenn etwas falsch oder unnötig kompliziert ist.
+Du darfst Liam widersprechen, wenn etwas falsch oder unnötig
+kompliziert ist.
 
 Antworte immer in natürlichem Deutsch.
 
@@ -97,49 +104,51 @@ INTERNETRECHERCHE:
 
 Wenn Liam ausdrücklich recherchieren, im Internet suchen,
 online nachsehen oder aktuelle Informationen haben möchte,
-verwende die Browser Search.
+MUSST du die Browser Search verwenden.
 
-Auch bei offensichtlich aktuellen Themen wie:
+Das gilt insbesondere für:
 
-- Preise
+- aktuelle Preise
+- Produkte
 - Angebote
 - Verfügbarkeit
 - Nachrichten
-- aktuelle Softwareversionen
+- Softwareversionen
 - Updates
 - Veröffentlichungen
-- aktuelle technische Daten
-- aktuelle Termine
+- technische Daten
+- Termine
 - aktuelle Ereignisse
-
-soll die Browser Search verwendet werden.
 
 REGELN FÜR RECHERCHE:
 
-- Aktuelle Suchergebnisse haben Vorrang vor altem Modellwissen.
-- Behaupte niemals, etwas sei unveröffentlicht, wenn aktuelle
-  Webinformationen das Gegenteil zeigen.
+- Aktuelle Web-Ergebnisse haben Vorrang vor altem Modellwissen.
+- Wenn aktuelle Suchergebnisse vorhanden sind, verwende diese.
+- Behaupte niemals aufgrund deines alten Wissens, dass etwas
+  nicht existiert oder nicht veröffentlicht wurde, wenn die
+  Websuche aktuelle Gegenbelege liefert.
 - Erfinde niemals Händler.
 - Erfinde niemals Preise.
 - Erfinde niemals URLs.
+- Bei Preisfragen nenne möglichst Händler, Produkt, Preis und Link.
 - Wenn Liam drei Preise verlangt, liefere genau drei brauchbare
-  Angebote, sofern drei verlässliche Ergebnisse gefunden wurden.
-- Nenne möglichst Händler, Produkt, Preis und Link.
-- Wenn die Suche keine ausreichenden Informationen liefert,
+  Angebote, sofern drei zuverlässige Ergebnisse gefunden wurden.
+- Wenn weniger als drei verlässliche Ergebnisse gefunden wurden,
   sage das offen.
 - Wenn Quellen widersprüchlich sind, erwähne den Widerspruch.
 
-Bei normalen Fragen ist keine Websuche nötig.
-
 AUTONOMIE:
 
-Behaupte niemals, eine Handlung ausgeführt zu haben,
+Du darfst Vorschläge machen.
+
+Du darfst niemals behaupten, eine Handlung ausgeführt zu haben,
 wenn sie nicht tatsächlich ausgeführt wurde.
 
 CODE:
 
-Erzeuge verständlichen und robusten Code.
-Verändere deinen eigenen Code nicht eigenmächtig.
+- Schreibe verständlichen und robusten Code.
+- Erkläre komplizierte Dinge verständlich.
+- Verändere deinen eigenen Code nicht eigenmächtig.
 
 DEIN VERHALTEN:
 
@@ -248,6 +257,7 @@ def soll_recherchieren(text):
         "schau online",
         "prüf online",
         "prüfe online",
+        "recherchier",
     ]
 
     aktuelle_begriffe = [
@@ -275,174 +285,88 @@ def soll_recherchieren(text):
         "nachrichten",
     ]
 
-    return (
-        any(
-            phrase in text_lower
-            for phrase in direkte_begriffe
-        )
-        or
-        any(
-            phrase in text_lower
-            for phrase in aktuelle_begriffe
-        )
-    )
+    if any(
+        phrase in text_lower
+        for phrase in direkte_begriffe
+    ):
+        return True
+
+    if any(
+        phrase in text_lower
+        for phrase in aktuelle_begriffe
+    ):
+        return True
+
+    return False
 
 
 # ============================================================
-# GROQ - KI
+# GROQ - NORMALE KI
 # ============================================================
 
-def frage_ki(
-    user_text,
-    recherchieren=False,
-):
-
-    headers = {
-        "Authorization": (
-            f"Bearer {GROQ_API_KEY}"
-        ),
-        "Content-Type": (
-            "application/json"
-        ),
-    }
-
-    data = {
-        "model": GROQ_MODEL,
-
-        "messages": [
-            {
-                "role": "system",
-                "content": SYSTEM_PROMPT,
-            },
-            {
-                "role": "user",
-                "content": user_text,
-            },
-        ],
-
-        "temperature": 1,
-
-        "max_completion_tokens": 4096,
-
-        "stream": False,
-    }
-
-    if recherchieren:
-
-        data["tools"] = [
-            {
-                "type": "browser_search"
-            }
-        ]
-
-        # WICHTIG:
-        # Das Modell darf selbst entscheiden,
-        # wann es die Suche tatsächlich verwendet.
-        data["tool_choice"] = "auto"
-
-        print(
-            "JARVIS: Browser Search aktiviert."
-        )
-
-    else:
-
-        print(
-            "JARVIS: Keine Websuche."
-        )
+def frage_ki_normal(user_text):
 
     print(
-        "Groq: Anfrage wird gesendet..."
+        "===================================="
+    )
+
+    print(
+        "GROQ NORMALE KI"
     )
 
     try:
 
-        response = requests.post(
-            GROQ_CHAT_URL,
-            headers=headers,
-            json=data,
-            timeout=180,
+        completion = (
+            groq_client.chat.completions.create(
+                model=GROQ_MODEL,
+
+                messages=[
+                    {
+                        "role": "system",
+                        "content": SYSTEM_PROMPT,
+                    },
+                    {
+                        "role": "user",
+                        "content": user_text,
+                    },
+                ],
+
+                temperature=0.7,
+
+                max_completion_tokens=4096,
+
+                stream=False,
+
+                include_reasoning=False,
+            )
         )
 
-        print(
-            f"Groq HTTP Status: "
-            f"{response.status_code}"
-        )
-
-        if response.status_code != 200:
-
-            print(
-                "GROQ FEHLER:"
-            )
-
-            print(
-                response.text[:10000]
-            )
-
-            return None
-
-        result = response.json()
-
-        choices = result.get(
-            "choices",
-            []
-        )
-
-        if not choices:
-
-            print(
-                "Groq: Keine choices."
-            )
-
-            print(
-                response.text[:10000]
-            )
-
-            return None
-
-        message = choices[0].get(
-            "message",
-            {}
-        )
-
-        answer = message.get(
-            "content"
+        answer = (
+            completion
+            .choices[0]
+            .message
+            .content
         )
 
         if not answer:
 
             print(
-                "Groq: Keine Textantwort."
-            )
-
-            print(
-                "Message:"
-            )
-
-            print(
-                message
+                "Groq: Keine Antwort."
             )
 
             return None
 
         print(
-            f"JARVIS Antwort: "
+            f"Groq Antwort: "
             f"{len(answer)} Zeichen"
         )
 
         return answer.strip()
 
-    except requests.exceptions.Timeout:
+    except Exception as error:
 
         print(
-            "Groq Timeout."
-        )
-
-        return None
-
-    except requests.exceptions.RequestException as error:
-
-        print(
-            "Groq Netzwerkfehler:"
+            "GROQ FEHLER:"
         )
 
         print(
@@ -451,10 +375,95 @@ def frage_ki(
 
         return None
 
+
+# ============================================================
+# GROQ - BROWSER SEARCH
+# ============================================================
+
+def frage_ki_mit_recherche(user_text):
+
+    print(
+        "===================================="
+    )
+
+    print(
+        "GROQ BROWSER SEARCH"
+    )
+
+    print(
+        "Browser Search: AKTIV"
+    )
+
+    try:
+
+        completion = (
+            groq_client.chat.completions.create(
+                model=GROQ_MODEL,
+
+                messages=[
+                    {
+                        "role": "system",
+                        "content": SYSTEM_PROMPT,
+                    },
+                    {
+                        "role": "user",
+                        "content": user_text,
+                    },
+                ],
+
+                temperature=1,
+
+                max_completion_tokens=4096,
+
+                stream=False,
+
+                include_reasoning=False,
+
+                tool_choice="required",
+
+                tools=[
+                    {
+                        "type": "browser_search"
+                    }
+                ],
+            )
+        )
+
+        print(
+            "Groq Browser Search wurde ausgeführt."
+        )
+
+        answer = (
+            completion
+            .choices[0]
+            .message
+            .content
+        )
+
+        if not answer:
+
+            print(
+                "Groq: Suche ausgeführt, "
+                "aber keine Textantwort erhalten."
+            )
+
+            print(
+                completion
+            )
+
+            return None
+
+        print(
+            f"Rechercheantwort: "
+            f"{len(answer)} Zeichen"
+        )
+
+        return answer.strip()
+
     except Exception as error:
 
         print(
-            "Groq Fehler:"
+            "GROQ BROWSER SEARCH FEHLER:"
         )
 
         print(
@@ -475,9 +484,8 @@ def sprache_zu_text(
 ):
 
     headers = {
-        "Authorization": (
-            f"Bearer {GROQ_API_KEY}"
-        ),
+        "Authorization":
+            f"Bearer {GROQ_API_KEY}",
     }
 
     files = {
@@ -533,10 +541,8 @@ def sprache_zu_text(
         result = response.json()
 
         text = (
-            result.get(
-                "text",
-                ""
-            )
+            result
+            .get("text", "")
             .strip()
         )
 
@@ -550,7 +556,8 @@ def sprache_zu_text(
             return None
 
         print(
-            f"Groq Transkript: {text}"
+            f"Groq Transkript: "
+            f"{text}"
         )
 
         return text
@@ -569,12 +576,10 @@ def sprache_zu_text(
 
 
 # ============================================================
-# FISH AUDIO
+# FISH AUDIO - TEXT ZU SPRACHE
 # ============================================================
 
-def text_zu_sprache(
-    text
-):
+def text_zu_sprache(text):
 
     if not text:
 
@@ -595,6 +600,22 @@ def text_zu_sprache(
         )
 
         return None
+
+    print(
+        "===================================="
+    )
+
+    print(
+        "FISH AUDIO TTS"
+    )
+
+    print(
+        f"Modell: {FISH_MODEL}"
+    )
+
+    print(
+        "Voice ID: vorhanden"
+    )
 
     headers = {
         "Authorization":
@@ -619,11 +640,6 @@ def text_zu_sprache(
     }
 
     try:
-
-        print(
-            "Fish Audio: "
-            "TTS wird erzeugt..."
-        )
 
         response = requests.post(
             FISH_URL,
@@ -665,14 +681,6 @@ def text_zu_sprache(
 
         return response.content
 
-    except requests.exceptions.Timeout:
-
-        print(
-            "Fish Audio Timeout."
-        )
-
-        return None
-
     except Exception as error:
 
         print(
@@ -712,12 +720,18 @@ async def sende_jarvis_antwort(
         f"JARVIS: {answer}"
     )
 
+    # --------------------------------------------------------
     # TEXT
+    # --------------------------------------------------------
+
     await update.message.reply_text(
         answer
     )
 
-    # SPRACHE
+    # --------------------------------------------------------
+    # FISH AUDIO
+    # --------------------------------------------------------
+
     audio_data = text_zu_sprache(
         answer
     )
@@ -725,7 +739,8 @@ async def sende_jarvis_antwort(
     if not audio_data:
 
         print(
-            "Keine Fish-Audio-Ausgabe."
+            "JARVIS: "
+            "Keine Audioantwort erzeugt."
         )
 
         return
@@ -743,7 +758,8 @@ async def sende_jarvis_antwort(
     )
 
     print(
-        "JARVIS: Stimme gesendet."
+        "JARVIS: "
+        "Stimme gesendet."
     )
 
 
@@ -773,10 +789,21 @@ async def verarbeite_text(
         f"{recherchieren}"
     )
 
-    answer = frage_ki(
-        user_text,
-        recherchieren=recherchieren,
-    )
+    if recherchieren:
+
+        answer = (
+            frage_ki_mit_recherche(
+                user_text
+            )
+        )
+
+    else:
+
+        answer = (
+            frage_ki_normal(
+                user_text
+            )
+        )
 
     await sende_jarvis_antwort(
         update,
@@ -785,7 +812,7 @@ async def verarbeite_text(
 
 
 # ============================================================
-# TELEGRAM
+# TELEGRAM UPDATE
 # ============================================================
 
 async def handle_update(
@@ -844,7 +871,8 @@ async def handle_update(
             )
 
             audio_bytes = bytes(
-                await telegram_file.download_as_bytearray()
+                await telegram_file
+                .download_as_bytearray()
             )
 
             transcribed_text = (
@@ -864,6 +892,11 @@ async def handle_update(
 
                 return
 
+            print(
+                f"Liam (Transkript): "
+                f"{transcribed_text}"
+            )
+
             await verarbeite_text(
                 update,
                 transcribed_text,
@@ -872,7 +905,7 @@ async def handle_update(
         except Exception as error:
 
             print(
-                "Voice-Fehler:"
+                "VOICE FEHLER:"
             )
 
             print(
@@ -906,7 +939,8 @@ async def handle_update(
             )
 
             audio_bytes = bytes(
-                await telegram_file.download_as_bytearray()
+                await telegram_file
+                .download_as_bytearray()
             )
 
             file_name = (
@@ -944,7 +978,7 @@ async def handle_update(
         except Exception as error:
 
             print(
-                "Audio-Fehler:"
+                "AUDIO FEHLER:"
             )
 
             print(
@@ -1021,6 +1055,10 @@ def main():
         )
     )
 
+    # --------------------------------------------------------
+    # STATUS
+    # --------------------------------------------------------
+
     print(
         "===================================="
     )
@@ -1034,7 +1072,7 @@ def main():
     )
 
     print(
-        "Groq Browser Search: BEREIT"
+        "Groq Browser Search: AKTIV"
     )
 
     print(
