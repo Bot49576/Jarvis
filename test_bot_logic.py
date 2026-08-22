@@ -11,7 +11,10 @@ from bot import (
     message_contents,
     remember_command,
     remove_matching_facts,
+    source_message,
     telegram_chunks,
+    text_for_speech,
+    without_source_section,
     wants_deeper_thinking,
     wants_web_search,
 )
@@ -92,6 +95,35 @@ class JarvisLogicTests(unittest.TestCase):
             interaction_sources(interaction),
             [("Beispiel", "https://example.com")],
         )
+
+    def test_model_source_section_is_removed(self):
+        answer = "Die stabile Version ist 26.2.\n\nQuellen:\n- https://example.com"
+        self.assertEqual(without_source_section(answer), "Die stabile Version ist 26.2.")
+
+    def test_speech_text_omits_links_sources_and_markdown(self):
+        answer = (
+            "Die **stabile** Version ist [26.2](https://example.com/version). "
+            "Version 26.3 ist noch ein Snapshot.\n\n"
+            "Quellen:\n- https://example.com"
+        )
+        spoken = text_for_speech(answer)
+        self.assertEqual(
+            spoken,
+            "Die stabile Version ist 26.2. Version 26.3 ist noch ein Snapshot.",
+        )
+        self.assertNotIn("http", spoken)
+        self.assertNotIn("Quellen", spoken)
+
+    def test_speech_text_is_shortened_at_sentence_boundary(self):
+        answer = " ".join(f"Satz {index}." for index in range(1, 8))
+        self.assertEqual(text_for_speech(answer), "Satz 1. Satz 2. Satz 3. Satz 4.")
+
+    def test_source_message_uses_short_clickable_labels(self):
+        message = source_message(
+            [("minecraft.net", "https://example.com/a-very-long-redirect")]
+        )
+        self.assertIn('>minecraft.net</a>', message)
+        self.assertNotIn("[https://", message)
 
 
 if __name__ == "__main__":
