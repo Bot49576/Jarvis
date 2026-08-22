@@ -22,6 +22,10 @@
   Interactions-API; normale Gespräche bleiben auf der schlanken
   Generate-Content-Schnittstelle.
 - Tokenzahlen werden im Render-Protokoll ausgegeben.
+- Text und Sprache sind getrennt aufbereitet: Telegram zeigt die Antwort und
+  höchstens drei anklickbare Quellen; Fish Audio liest nur eine kurze,
+  bereinigte Fassung ohne URLs, Quellenblock oder Markdown vor. Dafür ist kein
+  zweiter Gemini-Aufruf nötig.
 - Liams Angaben aus `Liam_allgemein_jarvis.txt` werden als geschützte Render-
   Variable `LIAM_BASE_PROFILE` hinterlegt, nicht im öffentlichen Repository.
   Neuere Aussagen und gespeicherte Fakten haben Vorrang; leere Felder werden
