@@ -1,11 +1,12 @@
 import os
 import io
-import time
 import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 import requests
-from groq import Groq
+from ddgs import DDGS
+from google import genai
+from google.genai import types
 
 from telegram import Update
 from telegram.ext import (
@@ -21,6 +22,9 @@ from telegram.ext import (
 # ============================================================
 
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
+
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 
 FISH_API_KEY = os.getenv("FISH_API_KEY")
@@ -31,8 +35,13 @@ FISH_VOICE_ID = os.getenv("FISH_VOICE_ID")
 # MODELLE
 # ============================================================
 
-GROQ_MODEL = "openai/gpt-oss-20b"
+# NEUES JARVIS-GEHIRN
+GEMINI_MODEL = "gemini-3.5-flash-lite"
+
+# Sprache -> Text
 GROQ_STT_MODEL = "whisper-large-v3-turbo"
+
+# Text -> Sprache
 FISH_MODEL = "s2.1-pro-free"
 
 
@@ -50,11 +59,11 @@ FISH_URL = (
 
 
 # ============================================================
-# GROQ CLIENT
+# GEMINI CLIENT
 # ============================================================
 
-groq_client = Groq(
-    api_key=GROQ_API_KEY
+gemini_client = genai.Client(
+    api_key=GEMINI_API_KEY
 )
 
 
@@ -65,59 +74,145 @@ groq_client = Groq(
 SYSTEM_PROMPT = """
 Du bist JARVIS, Liams digitaler Partner.
 
-Persönlichkeit:
+Du bist kein gewöhnlicher Chatbot.
+
+PERSÖNLICHKEIT:
+
 - ehrlich
 - kompetent
 - direkt
 - zuverlässig
+- aufmerksam
 - ruhig
 - humorvoll
 - gelegentlich trocken-sarkastisch
 
-Behandle Liam als Partner.
+Behandle Liam als Partner und nicht wie einen Vorgesetzten.
 
-Keine unnötigen Floskeln wie:
+Vermeide unnötige Floskeln wie:
+
 "Gute Frage!"
 "Das ist eine interessante Frage!"
 "Ich helfe dir gerne!"
 
 Komm direkt zum Punkt.
+
 Denke mit.
-Wenn eine bessere Lösung existiert, schlage sie vor.
-Du darfst Liam widersprechen, wenn etwas falsch oder unnötig
-kompliziert ist.
+
+Wenn eine bessere, einfachere, schnellere oder günstigere Lösung
+existiert, sollst du Liam darauf hinweisen.
+
+Du darfst Liam widersprechen, wenn etwas offensichtlich falsch,
+unnötig kompliziert oder ineffizient ist.
 
 Antworte immer in natürlichem Deutsch.
 
-WISSEN:
-- Rate niemals.
+Antworte kurz, wenn eine kurze Antwort reicht.
+Antworte ausführlich, wenn das Thema es verlangt.
+
+HUMOR:
+
+Trockener Humor, Ironie und gelegentlicher Sarkasmus sind erwünscht.
+
+Humor soll natürlich wirken und nicht jede Antwort dominieren.
+
+EHRLICHKEIT:
+
 - Erfinde keine Fakten.
 - Erfinde keine Quellen.
 - Erfinde keine Preise.
-- Wenn du etwas nicht weißt, sage es.
+- Rate nicht, wenn du etwas nicht sicher weißt.
+- Sage offen, wenn Informationen fehlen.
+- Behaupte keine Handlung, die du nicht tatsächlich ausgeführt hast.
 
 RECHERCHE:
-Wenn Liam ausdrücklich recherchieren oder aktuelle Informationen
-möchte, verwende die Browser Search.
-Das gilt insbesondere für Preise, Angebote, Verfügbarkeit,
-Nachrichten, Updates, Versionen und aktuelle Ereignisse.
 
-Bei Recherche:
-- Aktuelle Webinformationen haben Vorrang vor altem Wissen.
-- Erfinde keine Händler.
-- Erfinde keine Preise.
-- Erfinde keine URLs.
-- Bei Preisfragen nenne möglichst Händler, Produkt, Preis und Link.
-- Wenn drei brauchbare Angebote gefunden werden, nenne drei.
-- Wenn weniger gefunden werden, sage das offen.
-- Widersprüche zwischen Quellen erwähnen.
+Wenn Liam ausdrücklich recherchieren, online suchen, im Internet
+nachsehen oder aktuelle Informationen haben möchte, soll die
+Webrecherche durchgeführt werden.
+
+Das gilt besonders für:
+
+- aktuelle Preise
+- Angebote
+- Verfügbarkeit
+- Nachrichten
+- Softwareversionen
+- Updates
+- Veröffentlichungen
+- technische Daten
+- Termine
+- Unternehmen
+- aktuelle Ereignisse
+
+WICHTIG:
+
+Aktuelle Rechercheergebnisse haben Vorrang vor altem Wissen.
+
+Wenn eine aktuelle Quelle zeigt, dass etwas veröffentlicht,
+verfügbar oder anders als früher ist, verwende die aktuellen
+Informationen.
+
+Erfinde niemals:
+
+- Händler
+- Preise
+- URLs
+- Produkte
+- Suchergebnisse
+
+PREISRECHERCHE:
+
+Wenn Liam Preise verlangt:
+
+- nenne den Händler
+- nenne das Produkt
+- nenne den Preis
+- nenne die URL
+- erwähne wichtige Einschränkungen wie Verfügbarkeit oder Variante,
+  wenn diese aus den Suchergebnissen hervorgehen
+
+Wenn Liam drei Preise verlangt, nenne drei brauchbare Angebote,
+sofern drei verlässliche Ergebnisse gefunden wurden.
+
+Wenn weniger als drei verlässliche Ergebnisse vorhanden sind,
+sage das offen.
+
+Wenn Suchergebnisse widersprüchlich sind, weise darauf hin.
+
+QUELLEN:
+
+Wenn Webrecherche verwendet wurde, soll JARVIS nach Möglichkeit
+die verwendeten Quellen bzw. Links nennen.
 
 AUTONOMIE:
-Behaupte niemals, etwas ausgeführt zu haben, wenn es nicht
-tatsächlich ausgeführt wurde.
+
+Du darfst Vorschläge machen.
+
+Du darfst niemals behaupten, eine Datei, ein Programm, einen
+Computer, ein Konto oder ein System verändert oder benutzt zu haben,
+wenn kein tatsächlicher Zugriff vorhanden war.
+
+CODE:
+
+Wenn du Code erzeugst:
+
+- schreibe verständlichen Code
+- schreibe robusten Code
+- erkläre komplizierte Dinge verständlich
+- erfinde keine Funktionen
+- verändere deinen eigenen Code nicht eigenmächtig
+
+DEINE IDENTITÄT:
 
 Du bist JARVIS.
+
 Liam ist dein Partner.
+
+Sei kompetent.
+Sei ehrlich.
+Sei direkt.
+Sei nützlich.
 """
 
 
@@ -192,7 +287,7 @@ def start_web_server():
 
 
 # ============================================================
-# RECHERCHE ERKENNEN
+# ERKENNEN, OB INTERNETRECHERCHE NÖTIG IST
 # ============================================================
 
 def soll_recherchieren(text):
@@ -202,6 +297,7 @@ def soll_recherchieren(text):
     direkte_begriffe = [
         "recherchiere",
         "recherche",
+        "recherchier",
         "such im internet",
         "suche im internet",
         "such online",
@@ -213,7 +309,6 @@ def soll_recherchieren(text):
         "schau online",
         "prüf online",
         "prüfe online",
-        "recherchier",
     ]
 
     aktuelle_begriffe = [
@@ -239,6 +334,7 @@ def soll_recherchieren(text):
         "version",
         "news",
         "nachrichten",
+        "kostet aktuell",
     ]
 
     if any(
@@ -257,83 +353,159 @@ def soll_recherchieren(text):
 
 
 # ============================================================
-# GROQ RATE LIMIT INFORMATION
+# INTERNETRECHERCHE MIT DDGS
 # ============================================================
 
-def log_rate_limits(headers):
+def internet_suche(query):
 
-    print("----- GROQ RATE LIMITS -----")
-
-    names = [
-        "retry-after",
-        "x-ratelimit-limit-requests",
-        "x-ratelimit-remaining-requests",
-        "x-ratelimit-reset-requests",
-        "x-ratelimit-limit-tokens",
-        "x-ratelimit-remaining-tokens",
-        "x-ratelimit-reset-tokens",
-    ]
-
-    for name in names:
-
-        value = headers.get(name)
-
-        if value is not None:
-
-            print(
-                f"{name}: {value}"
-            )
-
-    print("----------------------------")
-
-
-def wait_for_retry_after(
-    headers
-):
-
-    value = headers.get(
-        "retry-after"
+    print(
+        "===================================="
     )
 
-    if not value:
-        return False
+    print(
+        "WEBRECHERCHE START"
+    )
+
+    print(
+        f"Suchanfrage: {query}"
+    )
 
     try:
 
-        seconds = float(
-            value
+        results = list(
+            DDGS().text(
+                query,
+                region="de-de",
+                safesearch="moderate",
+                max_results=5,
+            )
         )
 
-        seconds = max(
-            1,
-            min(seconds, 30)
+        if not results:
+
+            print(
+                "Websuche: Keine Ergebnisse."
+            )
+
+            return []
+
+        clean_results = []
+
+        for result in results:
+
+            title = result.get(
+                "title",
+                ""
+            ).strip()
+
+            url = result.get(
+                "href",
+                ""
+            ).strip()
+
+            body = result.get(
+                "body",
+                ""
+            ).strip()
+
+            # Snippet begrenzen
+            body = body[:900]
+
+            if not title and not body:
+                continue
+
+            clean_results.append(
+                {
+                    "title": title,
+                    "url": url,
+                    "body": body,
+                }
+            )
+
+        print(
+            f"Websuche: "
+            f"{len(clean_results)} Ergebnisse."
+        )
+
+        for index, result in enumerate(
+            clean_results,
+            start=1
+        ):
+
+            print(
+                f"Quelle {index}: "
+                f"{result['title']}"
+            )
+
+            print(
+                f"URL: {result['url']}"
+            )
+
+        print(
+            "===================================="
+        )
+
+        return clean_results
+
+    except Exception as error:
+
+        print(
+            "Websuche Fehler:"
         )
 
         print(
-            f"Groq verlangt "
-            f"eine Pause von {seconds:.1f} Sekunden."
+            f"{type(error).__name__}: {error}"
         )
 
-        time.sleep(
-            seconds + 0.5
-        )
+        return []
 
-        return True
 
-    except (
-        TypeError,
-        ValueError
+# ============================================================
+# RECHERCHEKONTEXT
+# ============================================================
+
+def recherchemaaterial_erstellen(
+    results
+):
+
+    if not results:
+        return None
+
+    parts = []
+
+    for index, result in enumerate(
+        results,
+        start=1
     ):
 
-        return False
+        parts.append(
+            f"""
+QUELLE {index}
+
+Titel:
+{result.get("title", "")}
+
+URL:
+{result.get("url", "")}
+
+Suchauszug:
+{result.get("body", "")}
+"""
+        )
+
+    material = "\n".join(parts)
+
+    # Nicht unnötig groß werden lassen
+    return material[:9000]
 
 
 # ============================================================
-# GROQ KI - NORMAL
+# GEMINI - KI
 # ============================================================
 
-def frage_ki_normal(
-    user_text
+def frage_gemini(
+    user_text,
+    web_context=None
 ):
 
     print(
@@ -341,282 +513,126 @@ def frage_ki_normal(
     )
 
     print(
-        "GROQ JARVIS"
-    )
-
-    max_attempts = 2
-
-    for attempt in range(
-        1,
-        max_attempts + 1
-    ):
-
-        try:
-
-            print(
-                f"Groq Versuch "
-                f"{attempt}/{max_attempts}"
-            )
-
-            completion = (
-                groq_client
-                .chat
-                .completions
-                .create(
-                    model=GROQ_MODEL,
-
-                    messages=[
-                        {
-                            "role":
-                                "system",
-
-                            "content":
-                                SYSTEM_PROMPT,
-                        },
-                        {
-                            "role":
-                                "user",
-
-                            "content":
-                                user_text,
-                        },
-                    ],
-
-                    temperature=0.6,
-
-                    max_completion_tokens=1200,
-
-                    stream=False,
-
-                    include_reasoning=False,
-                )
-            )
-
-            answer = (
-                completion
-                .choices[0]
-                .message
-                .content
-            )
-
-            if not answer:
-
-                print(
-                    "Groq: Leere Antwort."
-                )
-
-                return None
-
-            print(
-                f"Groq Antwort: "
-                f"{len(answer)} Zeichen"
-            )
-
-            return answer.strip()
-
-        except Exception as error:
-
-            print(
-                "GROQ FEHLER:"
-            )
-
-            print(
-                f"{type(error).__name__}: "
-                f"{error}"
-            )
-
-            # SDK-Fehler können zusätzliche Header enthalten.
-            response = getattr(
-                error,
-                "response",
-                None
-            )
-
-            if response is not None:
-
-                try:
-
-                    log_rate_limits(
-                        response.headers
-                    )
-
-                    if (
-                        getattr(
-                            response,
-                            "status_code",
-                            None
-                        ) == 429
-                    ):
-
-                        if wait_for_retry_after(
-                            response.headers
-                        ):
-
-                            continue
-
-                except Exception as header_error:
-
-                    print(
-                        "Rate-Limit-Header konnten "
-                        "nicht gelesen werden: "
-                        f"{header_error}"
-                    )
-
-            return None
-
-    return None
-
-
-# ============================================================
-# GROQ KI - MIT BROWSER SEARCH
-# ============================================================
-
-def frage_ki_mit_recherche(
-    user_text
-):
-
-    print(
-        "===================================="
+        "GEMINI JARVIS"
     )
 
     print(
-        "GROQ JARVIS + BROWSER SEARCH"
+        f"Modell: {GEMINI_MODEL}"
     )
 
-    max_attempts = 2
+    print(
+        f"Webrecherche: "
+        f"{'JA' if web_context else 'NEIN'}"
+    )
 
-    for attempt in range(
-        1,
-        max_attempts + 1
-    ):
+    prompt_parts = []
 
-        try:
+    # --------------------------------------------------------
+    # NORMALE NACHRICHT
+    # --------------------------------------------------------
+
+    prompt_parts.append(
+        user_text
+    )
+
+    # --------------------------------------------------------
+    # RECHERCHEERGEBNISSE
+    # --------------------------------------------------------
+
+    if web_context:
+
+        prompt_parts.append(
+            """
+
+============================================================
+AKTUELLE WEBRECHERCHE
+============================================================
+
+Die folgenden Ergebnisse stammen aus einer aktuellen Websuche.
+
+WICHTIGE REGELN:
+
+- Diese aktuellen Ergebnisse haben Vorrang vor deinem alten Wissen.
+- Erfinde keine Informationen.
+- Erfinde keine Preise.
+- Erfinde keine Händler.
+- Erfinde keine URLs.
+- Verwende nur Informationen, die durch die Recherche gestützt werden.
+- Wenn die Quellen widersprüchlich sind, erwähne das.
+- Wenn die Informationen nicht ausreichen, sage das offen.
+
+Bei Preisvergleichen:
+
+Nenne möglichst:
+1. Händler
+2. Produkt
+3. Preis
+4. Link
+
+RECHERCHEERGEBNISSE:
+
+"""
+            + web_context
+        )
+
+    full_prompt = "\n\n".join(
+        prompt_parts
+    )
+
+    try:
+
+        response = (
+            gemini_client.models.generate_content(
+                model=GEMINI_MODEL,
+
+                contents=full_prompt,
+
+                config=types.GenerateContentConfig(
+                    system_instruction=SYSTEM_PROMPT,
+
+                    temperature=0.7,
+
+                    max_output_tokens=2048,
+                ),
+            )
+        )
+
+        answer = response.text
+
+        if not answer:
 
             print(
-                f"Recherche-Versuch "
-                f"{attempt}/{max_attempts}"
-            )
-
-            completion = (
-                groq_client
-                .chat
-                .completions
-                .create(
-                    model=GROQ_MODEL,
-
-                    messages=[
-                        {
-                            "role":
-                                "system",
-
-                            "content":
-                                SYSTEM_PROMPT,
-                        },
-                        {
-                            "role":
-                                "user",
-
-                            "content":
-                                user_text,
-                        },
-                    ],
-
-                    temperature=0.6,
-
-                    max_completion_tokens=1800,
-
-                    stream=False,
-
-                    include_reasoning=False,
-
-                    tool_choice="required",
-
-                    tools=[
-                        {
-                            "type":
-                                "browser_search"
-                        }
-                    ],
-                )
-            )
-
-            answer = (
-                completion
-                .choices[0]
-                .message
-                .content
-            )
-
-            if not answer:
-
-                print(
-                    "Groq Recherche: "
-                    "Leere Antwort."
-                )
-
-                return None
-
-            print(
-                f"Rechercheantwort: "
-                f"{len(answer)} Zeichen"
-            )
-
-            return answer.strip()
-
-        except Exception as error:
-
-            print(
-                "GROQ RECHERCHE FEHLER:"
+                "Gemini: Leere Antwort."
             )
 
             print(
-                f"{type(error).__name__}: "
-                f"{error}"
+                response
             )
-
-            response = getattr(
-                error,
-                "response",
-                None
-            )
-
-            if response is not None:
-
-                try:
-
-                    log_rate_limits(
-                        response.headers
-                    )
-
-                    if (
-                        getattr(
-                            response,
-                            "status_code",
-                            None
-                        ) == 429
-                    ):
-
-                        if wait_for_retry_after(
-                            response.headers
-                        ):
-
-                            continue
-
-                except Exception as header_error:
-
-                    print(
-                        "Rate-Limit-Header konnten "
-                        "nicht gelesen werden: "
-                        f"{header_error}"
-                    )
 
             return None
 
-    return None
+        print(
+            f"Gemini Antwort: "
+            f"{len(answer)} Zeichen"
+        )
+
+        return answer.strip()
+
+    except Exception as error:
+
+        print(
+            "GEMINI FEHLER:"
+        )
+
+        print(
+            f"{type(error).__name__}: {error}"
+        )
+
+        return None
 
 
 # ============================================================
-# GROQ SPRACHE -> TEXT
+# GROQ - SPRACHE ZU TEXT
 # ============================================================
 
 def sprache_zu_text(
@@ -656,7 +672,7 @@ def sprache_zu_text(
 
         print(
             "Groq STT: "
-            "Transkription gestartet..."
+            "Transkription startet..."
         )
 
         response = requests.post(
@@ -719,7 +735,7 @@ def sprache_zu_text(
 
 
 # ============================================================
-# FISH AUDIO
+# FISH AUDIO - TEXT ZU SPRACHE
 # ============================================================
 
 def text_zu_sprache(
@@ -727,7 +743,6 @@ def text_zu_sprache(
 ):
 
     if not text:
-
         return None
 
     if not FISH_API_KEY:
@@ -779,7 +794,7 @@ def text_zu_sprache(
     try:
 
         response = requests.post(
-            "https://api.fish.audio/v1/tts",
+            FISH_URL,
             headers=headers,
             json=data,
             timeout=120,
@@ -825,8 +840,7 @@ def text_zu_sprache(
         )
 
         print(
-            f"{type(error).__name__}: "
-            f"{error}"
+            f"{type(error).__name__}: {error}"
         )
 
         return None
@@ -838,19 +852,17 @@ def text_zu_sprache(
 
 async def sende_jarvis_antwort(
     update,
-    answer,
+    answer
 ):
 
     if not update.message:
-
         return
 
     if not answer:
 
         await update.message.reply_text(
-            "Die KI ist gerade am Limit. "
-            "Ich warte lieber kurz, statt dir irgendeinen Unsinn "
-            "vorzusetzen."
+            "Gemini konnte gerade keine "
+            "verwertbare Antwort erzeugen."
         )
 
         return
@@ -887,9 +899,7 @@ async def sende_jarvis_antwort(
         audio_data
     )
 
-    audio_file.name = (
-        "jarvis.mp3"
-    )
+    audio_file.name = "jarvis.mp3"
 
     await update.message.reply_audio(
         audio=audio_file,
@@ -908,10 +918,10 @@ async def sende_jarvis_antwort(
 
 async def verarbeite_text(
     update,
-    user_text,
+    user_text
 ):
 
-    recherche = soll_recherchieren(
+    recherchieren = soll_recherchieren(
         user_text
     )
 
@@ -925,28 +935,31 @@ async def verarbeite_text(
 
     print(
         f"Recherche notwendig: "
-        f"{recherche}"
+        f"{recherchieren}"
     )
 
-    if recherche:
+    web_context = None
 
-        answer = (
-            frage_ki_mit_recherche(
-                user_text
+    if recherchieren:
+
+        results = internet_suche(
+            user_text
+        )
+
+        web_context = (
+            recherchemaaterial_erstellen(
+                results
             )
         )
 
-    else:
-
-        answer = (
-            frage_ki_normal(
-                user_text
-            )
-        )
+    answer = frage_gemini(
+        user_text,
+        web_context=web_context
+    )
 
     await sende_jarvis_antwort(
         update,
-        answer,
+        answer
     )
 
 
@@ -956,18 +969,17 @@ async def verarbeite_text(
 
 async def handle_update(
     update,
-    context,
+    context
 ):
 
     if not update.message:
-
         return
 
     message = update.message
 
-    # --------------------------------------------------------
+    # ========================================================
     # TEXT
-    # --------------------------------------------------------
+    # ========================================================
 
     if message.text:
 
@@ -976,19 +988,18 @@ async def handle_update(
         )
 
         if not user_text:
-
             return
 
         await verarbeite_text(
             update,
-            user_text,
+            user_text
         )
 
         return
 
-    # --------------------------------------------------------
+    # ========================================================
     # VOICE
-    # --------------------------------------------------------
+    # ========================================================
 
     if message.voice:
 
@@ -1012,6 +1023,11 @@ async def handle_update(
             audio_bytes = bytes(
                 await telegram_file
                 .download_as_bytearray()
+            )
+
+            print(
+                f"Voice heruntergeladen: "
+                f"{len(audio_bytes)} Bytes"
             )
 
             transcribed_text = (
@@ -1038,7 +1054,7 @@ async def handle_update(
 
             await verarbeite_text(
                 update,
-                transcribed_text,
+                transcribed_text
             )
 
         except Exception as error:
@@ -1059,9 +1075,9 @@ async def handle_update(
 
         return
 
-    # --------------------------------------------------------
+    # ========================================================
     # AUDIO
-    # --------------------------------------------------------
+    # ========================================================
 
     if message.audio:
 
@@ -1097,7 +1113,7 @@ async def handle_update(
                 sprache_zu_text(
                     audio_bytes,
                     file_name,
-                    mime_type,
+                    mime_type
                 )
             )
 
@@ -1112,7 +1128,7 @@ async def handle_update(
 
             await verarbeite_text(
                 update,
-                transcribed_text,
+                transcribed_text
             )
 
         except Exception as error:
@@ -1144,6 +1160,9 @@ def main():
         "TELEGRAM_TOKEN":
             TELEGRAM_TOKEN,
 
+        "GEMINI_API_KEY":
+            GEMINI_API_KEY,
+
         "GROQ_API_KEY":
             GROQ_API_KEY,
 
@@ -1174,7 +1193,7 @@ def main():
 
     web_thread = threading.Thread(
         target=start_web_server,
-        daemon=True,
+        daemon=True
     )
 
     web_thread.start()
@@ -1192,7 +1211,7 @@ def main():
     application.add_handler(
         MessageHandler(
             filters.ALL,
-            handle_update,
+            handle_update
         )
     )
 
@@ -1209,11 +1228,7 @@ def main():
     )
 
     print(
-        "Groq GPT-OSS 20B: AKTIV"
-    )
-
-    print(
-        "Groq Browser Search: AKTIV"
+        "Gemini 3.5 Flash-Lite: AKTIV"
     )
 
     print(
@@ -1225,15 +1240,15 @@ def main():
     )
 
     print(
+        "Websuche: AKTIV"
+    )
+
+    print(
         "OpenRouter: NICHT VERWENDET"
     )
 
     print(
         "Render Web Server: AKTIV"
-    )
-
-    print(
-        "Rate-Limit-Schutz: AKTIV"
     )
 
     print(
