@@ -343,6 +343,21 @@ def message_contents(messages: list[dict], user_text: str) -> list[types.Content
     return contents
 
 
+def interaction_input(messages: list[dict], user_text: str) -> str:
+    """Flacher Gesprächsverlauf für die Interactions-API bei Webrecherchen."""
+    history = []
+    for message in messages[-RECENT_MESSAGES_TO_KEEP:]:
+        speaker = "Liam" if message.get("role") == "user" else "JARVIS"
+        history.append(f"{speaker}: {message.get('text', '')}")
+    if not history:
+        return user_text
+    return (
+        "Bisheriger Gesprächsverlauf (nur soweit für die aktuelle Frage relevant):\n"
+        + "\n".join(history)
+        + f"\n\nAktuelle Frage von Liam: {user_text}"
+    )
+
+
 def print_usage(response, label: str) -> None:
     usage = getattr(response, "usage_metadata", None)
     if not usage:
@@ -354,17 +369,35 @@ def print_usage(response, label: str) -> None:
     print(f"Kostenkontrolle {label}: input={prompt}, output={answer}, thinking={thinking}, total={total}")
 
 
-def grounding_sources(response) -> list[tuple[str, str]]:
+def print_interaction_usage(interaction, label: str) -> None:
+    usage = getattr(interaction, "usage", None)
+    if not usage:
+        return
+    prompt = getattr(usage, "total_input_tokens", None)
+    answer = getattr(usage, "total_output_tokens", None)
+    thinking = getattr(usage, "total_thought_tokens", None)
+    tools = getattr(usage, "total_tool_use_tokens", None)
+    total = getattr(usage, "total_tokens", None)
+    print(
+        f"Kostenkontrolle {label}: input={prompt}, output={answer}, "
+        f"thinking={thinking}, tools={tools}, total={total}"
+    )
+
+
+def interaction_sources(interaction) -> list[tuple[str, str]]:
     sources: list[tuple[str, str]] = []
     try:
-        for candidate in response.candidates or []:
-            grounding = getattr(candidate, "grounding_metadata", None)
-            for chunk in getattr(grounding, "grounding_chunks", None) or []:
-                web = getattr(chunk, "web", None)
-                uri = getattr(web, "uri", None)
-                title = getattr(web, "title", None) or "Quelle"
-                if uri and all(uri != existing_uri for _, existing_uri in sources):
-                    sources.append((title, uri))
+        for step in getattr(interaction, "steps", None) or []:
+            if getattr(step, "type", None) != "model_output":
+                continue
+            for block in getattr(step, "content", None) or []:
+                for annotation in getattr(block, "annotations", None) or []:
+                    if getattr(annotation, "type", None) != "url_citation":
+                        continue
+                    uri = getattr(annotation, "url", None)
+                    title = getattr(annotation, "title", None) or "Quelle"
+                    if uri and all(uri != existing_uri for _, existing_uri in sources):
+                        sources.append((title, uri))
     except Exception as error:
         print(f"Quellen konnten nicht vollständig gelesen werden: {type(error).__name__}")
     return sources[:5]
@@ -376,19 +409,42 @@ def ask_gemini(user_text: str, state: ChatMemory, research: bool, deep: bool) ->
         return None
 
     thinking_level = "medium" if deep else "low"
+    system_instruction = SYSTEM_PROMPT + "\n\n" + LIAM_BASE_PROFILE + memory_context(state)
     config_kwargs = {
-        "system_instruction": SYSTEM_PROMPT + "\n\n" + LIAM_BASE_PROFILE + memory_context(state),
+        "system_instruction": system_instruction,
         "thinking_config": types.ThinkingConfig(thinking_level=thinking_level),
         "max_output_tokens": 2_048,
     }
-    if research:
-        config_kwargs["tools"] = [types.Tool(google_search=types.GoogleSearch())]
 
     print(
         f"Gemini: model={GEMINI_MODEL}, thinking={thinking_level}, "
         f"web={'an' if research else 'aus'}, history={len(state.messages)}"
     )
     try:
+        if research:
+            interaction = gemini_client.interactions.create(
+                model=GEMINI_MODEL,
+                input=interaction_input(state.messages, user_text),
+                system_instruction=system_instruction,
+                tools=[{"type": "google_search"}],
+                generation_config={
+                    "thinking_level": thinking_level,
+                    "max_output_tokens": 2_048,
+                },
+                store=False,
+            )
+            print_interaction_usage(interaction, "Web-Antwort")
+            answer = (getattr(interaction, "output_text", None) or "").strip()
+            if not answer:
+                print("Gemini-Websuche: Leere Textantwort erhalten.")
+                return None
+            sources = interaction_sources(interaction)
+            if sources:
+                answer += "\n\nQuellen:\n" + "\n".join(
+                    f"- {title}: {uri}" for title, uri in sources
+                )
+            return answer
+
         response = gemini_client.models.generate_content(
             model=GEMINI_MODEL,
             contents=message_contents(state.messages, user_text),
@@ -398,12 +454,6 @@ def ask_gemini(user_text: str, state: ChatMemory, research: bool, deep: bool) ->
         answer = (response.text or "").strip()
         if not answer:
             return None
-        if research:
-            sources = grounding_sources(response)
-            if sources:
-                answer += "\n\nQuellen:\n" + "\n".join(
-                    f"- {title}: {uri}" for title, uri in sources
-                )
         return answer
     except Exception as error:
         print(f"Gemini-Fehler: {type(error).__name__}: {error}")
