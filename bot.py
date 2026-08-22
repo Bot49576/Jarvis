@@ -5,6 +5,7 @@ import json
 import os
 import re
 import threading
+import time
 from dataclasses import dataclass, field
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler, HTTPServer
@@ -54,6 +55,7 @@ MAX_FACTS = 100
 MAX_SOURCES = 3
 MAX_SPEECH_CHARS = 700
 MAX_SPEECH_SENTENCES = 4
+GEMINI_RETRY_DELAY_SECONDS = 0.75
 
 
 SYSTEM_PROMPT = """
@@ -339,7 +341,7 @@ def memory_context(state: ChatMemory) -> str:
     )
 
 
-def message_contents(messages: list[dict], user_text: str) -> list[types.Content]:
+def history_contents(messages: list[dict]) -> list[types.Content]:
     contents = []
     for message in messages[-RECENT_MESSAGES_TO_KEEP:]:
         role = "model" if message.get("role") == "assistant" else "user"
@@ -349,6 +351,11 @@ def message_contents(messages: list[dict], user_text: str) -> list[types.Content
                 parts=[types.Part.from_text(text=message.get("text", ""))],
             )
         )
+    return contents
+
+
+def message_contents(messages: list[dict], user_text: str) -> list[types.Content]:
+    contents = history_contents(messages)
     contents.append(types.Content(role="user", parts=[types.Part.from_text(text=user_text)]))
     return contents
 
@@ -461,6 +468,43 @@ def print_interaction_usage(interaction, label: str) -> None:
     )
 
 
+def response_diagnostics(response) -> str:
+    """Beschreibt leere Gemini-Antworten, ohne Gesprächsinhalte zu protokollieren."""
+    candidates = getattr(response, "candidates", None) or []
+    prompt_feedback = getattr(response, "prompt_feedback", None)
+    block_reason = getattr(prompt_feedback, "block_reason", None)
+    if not candidates:
+        return f"candidates=0, block={block_reason or 'none'}"
+
+    candidate = candidates[0]
+    finish_reason = getattr(candidate, "finish_reason", None) or "none"
+    finish_message = getattr(candidate, "finish_message", None) or "none"
+    content = getattr(candidate, "content", None)
+    parts = getattr(content, "parts", None) or []
+    part_kinds: list[str] = []
+    for part in parts:
+        if getattr(part, "text", None) is not None:
+            part_kinds.append("thought_text" if getattr(part, "thought", False) else "text")
+        elif getattr(part, "function_call", None) is not None:
+            part_kinds.append("function_call")
+        else:
+            part_kinds.append("other")
+    return (
+        f"candidates={len(candidates)}, finish={finish_reason}, "
+        f"message={finish_message}, parts={part_kinds or ['none']}"
+    )
+
+
+def interaction_diagnostics(interaction) -> str:
+    steps = getattr(interaction, "steps", None) or []
+    step_types = [getattr(step, "type", None) or "unknown" for step in steps]
+    return f"steps={step_types or ['none']}"
+
+
+def retry_thinking_level(primary_level: str) -> str:
+    return "low" if primary_level == "medium" else "minimal"
+
+
 def interaction_sources(interaction) -> list[tuple[str, str]]:
     sources: list[tuple[str, str]] = []
     seen_titles: set[str] = set()
@@ -505,51 +549,71 @@ def ask_gemini(
             "keine URLs und keinen Abschnitt mit der Überschrift 'Quellen' hinzu; das System "
             "ergänzt die gefundenen Quellen separat."
         )
-    config_kwargs = {
-        "system_instruction": system_instruction,
-        "thinking_config": types.ThinkingConfig(thinking_level=thinking_level),
-        "max_output_tokens": 2_048,
-    }
-
-    print(
-        f"Gemini: model={GEMINI_MODEL}, thinking={thinking_level}, "
-        f"web={'an' if research else 'aus'}, history={len(state.messages)}"
-    )
-    try:
-        if research:
-            interaction = gemini_client.interactions.create(
-                model=GEMINI_MODEL,
-                input=interaction_input(state.messages, user_text),
-                system_instruction=system_instruction,
-                tools=[{"type": "google_search"}],
-                generation_config={
-                    "thinking_level": thinking_level,
-                    "max_output_tokens": 2_048,
-                },
-                store=False,
-            )
-            print_interaction_usage(interaction, "Web-Antwort")
-            answer = without_source_section(
-                (getattr(interaction, "output_text", None) or "").strip()
-            )
-            if not answer:
-                print("Gemini-Websuche: Leere Textantwort erhalten.")
-                return None
-            return AssistantReply(answer, interaction_sources(interaction))
-
-        response = gemini_client.models.generate_content(
-            model=GEMINI_MODEL,
-            contents=message_contents(state.messages, user_text),
-            config=types.GenerateContentConfig(**config_kwargs),
+    levels = [thinking_level, retry_thinking_level(thinking_level)]
+    for attempt, current_level in enumerate(levels, start=1):
+        print(
+            f"Gemini: model={GEMINI_MODEL}, thinking={current_level}, "
+            f"web={'an' if research else 'aus'}, history={len(state.messages)}, "
+            f"attempt={attempt}/2"
         )
-        print_usage(response, "Antwort")
-        answer = (response.text or "").strip()
-        if not answer:
-            return None
-        return AssistantReply(answer)
-    except Exception as error:
-        print(f"Gemini-Fehler: {type(error).__name__}: {error}")
-        return None
+        try:
+            if research:
+                interaction = gemini_client.interactions.create(
+                    model=GEMINI_MODEL,
+                    input=interaction_input(state.messages, user_text),
+                    system_instruction=system_instruction,
+                    tools=[{"type": "google_search"}],
+                    generation_config={
+                        "thinking_level": current_level,
+                        "max_output_tokens": 2_048,
+                    },
+                    store=False,
+                )
+                print_interaction_usage(interaction, f"Web-Antwort Versuch {attempt}")
+                answer = without_source_section(
+                    (getattr(interaction, "output_text", None) or "").strip()
+                )
+                if answer:
+                    return AssistantReply(answer, interaction_sources(interaction))
+                print(
+                    "Gemini-Websuche: Leere Textantwort erhalten; "
+                    + interaction_diagnostics(interaction)
+                )
+            else:
+                config = types.GenerateContentConfig(
+                    system_instruction=system_instruction,
+                    thinking_config=types.ThinkingConfig(
+                        thinking_level=current_level,
+                        include_thoughts=False,
+                    ),
+                    max_output_tokens=2_048,
+                )
+                chat = gemini_client.chats.create(
+                    model=GEMINI_MODEL,
+                    config=config,
+                    history=history_contents(state.messages),
+                )
+                response = chat.send_message(user_text)
+                print_usage(response, f"Antwort Versuch {attempt}")
+                answer = (response.text or "").strip()
+                if answer:
+                    return AssistantReply(answer)
+                print(
+                    "Gemini: Leere Textantwort erhalten; "
+                    + response_diagnostics(response)
+                )
+        except Exception as error:
+            print(
+                f"Gemini-Fehler Versuch {attempt}: "
+                f"{type(error).__name__}: {error}"
+            )
+
+        if attempt == 1:
+            print("Gemini: Einmaliger Wiederholungsversuch mit reduzierter Denkstufe.")
+            time.sleep(GEMINI_RETRY_DELAY_SECONDS)
+
+    print("Gemini: Beide Antwortversuche sind fehlgeschlagen.")
+    return None
 
 
 def summarize_old_messages(state: ChatMemory) -> None:
