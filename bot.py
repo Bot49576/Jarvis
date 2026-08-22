@@ -374,6 +374,25 @@ def without_source_section(text: str) -> str:
     return text[: match.start()].rstrip() if match else text.strip()
 
 
+def pronounce_version_numbers(text: str) -> str:
+    """Verhindert, dass Fish Versionsnummern wie 26.2 als Datum vorliest."""
+    context = re.compile(
+        r"\b(?:version(?:en|snummern?)?|snapshot|release|build|firmware|software|edition)\b",
+        re.I,
+    )
+    dotted_number = re.compile(
+        r"(?<![\d.])\d{1,4}(?:\.\d{1,4}){1,3}(?!\d)(?!\.\d)"
+    )
+    sentences = re.split(r"(?<=[.!?])\s+", text)
+
+    for index, sentence in enumerate(sentences):
+        if context.search(sentence):
+            sentences[index] = dotted_number.sub(
+                lambda match: match.group(0).replace(".", " Punkt "), sentence
+            )
+    return " ".join(sentences)
+
+
 def text_for_speech(text: str) -> str:
     """Erzeugt ohne weiteren KI-Aufruf eine kurze, natürlich lesbare Fassung."""
     spoken = without_source_section(text)
@@ -382,6 +401,7 @@ def text_for_speech(text: str) -> str:
     spoken = re.sub(r"(?m)^\s*[-*•#]+\s*", "", spoken)
     spoken = re.sub(r"[`*_#>]", "", spoken)
     spoken = " ".join(spoken.split()).strip()
+    spoken = pronounce_version_numbers(spoken)
     if not spoken:
         return ""
 
