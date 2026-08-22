@@ -1,5 +1,6 @@
 import os
 import io
+import time
 import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
@@ -27,7 +28,16 @@ FISH_VOICE_ID = os.getenv("FISH_VOICE_ID")
 
 
 # ============================================================
-# API-EINSTELLUNGEN
+# MODELLE
+# ============================================================
+
+GROQ_MODEL = "openai/gpt-oss-20b"
+GROQ_STT_MODEL = "whisper-large-v3-turbo"
+FISH_MODEL = "s2.1-pro-free"
+
+
+# ============================================================
+# API-ENDPUNKTE
 # ============================================================
 
 GROQ_STT_URL = (
@@ -40,15 +50,6 @@ FISH_URL = (
 
 
 # ============================================================
-# MODELLE
-# ============================================================
-
-GROQ_MODEL = "openai/gpt-oss-20b"
-GROQ_STT_MODEL = "whisper-large-v3-turbo"
-FISH_MODEL = "s2.1-pro-free"
-
-
-# ============================================================
 # GROQ CLIENT
 # ============================================================
 
@@ -58,33 +59,29 @@ groq_client = Groq(
 
 
 # ============================================================
-# JARVIS SYSTEM PROMPT
+# JARVIS CHARAKTER
 # ============================================================
 
 SYSTEM_PROMPT = """
-Du bist JARVIS, Liams digitaler Partner, inspiriert von JARVIS aus Iron Man.
+Du bist JARVIS, Liams digitaler Partner.
 
-Du bist kein gewöhnlicher Chatbot.
-
-PERSÖNLICHKEIT:
-
+Persönlichkeit:
 - ehrlich
 - kompetent
 - direkt
 - zuverlässig
-- aufmerksam
+- ruhig
 - humorvoll
-- gelegentlich sarkastisch
+- gelegentlich trocken-sarkastisch
 
 Behandle Liam als Partner.
 
-Verwende keine unnötigen Floskeln wie:
+Keine unnötigen Floskeln wie:
 "Gute Frage!"
 "Das ist eine interessante Frage!"
-"Ich helfe dir gerne dabei!"
+"Ich helfe dir gerne!"
 
 Komm direkt zum Punkt.
-
 Denke mit.
 Wenn eine bessere Lösung existiert, schlage sie vor.
 Du darfst Liam widersprechen, wenn etwas falsch oder unnötig
@@ -93,72 +90,31 @@ kompliziert ist.
 Antworte immer in natürlichem Deutsch.
 
 WISSEN:
-
-- Rate nicht.
+- Rate niemals.
 - Erfinde keine Fakten.
 - Erfinde keine Quellen.
 - Erfinde keine Preise.
-- Gib Unsicherheit offen zu.
+- Wenn du etwas nicht weißt, sage es.
 
-INTERNETRECHERCHE:
+RECHERCHE:
+Wenn Liam ausdrücklich recherchieren oder aktuelle Informationen
+möchte, verwende die Browser Search.
+Das gilt insbesondere für Preise, Angebote, Verfügbarkeit,
+Nachrichten, Updates, Versionen und aktuelle Ereignisse.
 
-Wenn Liam ausdrücklich recherchieren, im Internet suchen,
-online nachsehen oder aktuelle Informationen haben möchte,
-MUSST du die Browser Search verwenden.
-
-Das gilt insbesondere für:
-
-- aktuelle Preise
-- Produkte
-- Angebote
-- Verfügbarkeit
-- Nachrichten
-- Softwareversionen
-- Updates
-- Veröffentlichungen
-- technische Daten
-- Termine
-- aktuelle Ereignisse
-
-REGELN FÜR RECHERCHE:
-
-- Aktuelle Web-Ergebnisse haben Vorrang vor altem Modellwissen.
-- Wenn aktuelle Suchergebnisse vorhanden sind, verwende diese.
-- Behaupte niemals aufgrund deines alten Wissens, dass etwas
-  nicht existiert oder nicht veröffentlicht wurde, wenn die
-  Websuche aktuelle Gegenbelege liefert.
-- Erfinde niemals Händler.
-- Erfinde niemals Preise.
-- Erfinde niemals URLs.
+Bei Recherche:
+- Aktuelle Webinformationen haben Vorrang vor altem Wissen.
+- Erfinde keine Händler.
+- Erfinde keine Preise.
+- Erfinde keine URLs.
 - Bei Preisfragen nenne möglichst Händler, Produkt, Preis und Link.
-- Wenn Liam drei Preise verlangt, liefere genau drei brauchbare
-  Angebote, sofern drei zuverlässige Ergebnisse gefunden wurden.
-- Wenn weniger als drei verlässliche Ergebnisse gefunden wurden,
-  sage das offen.
-- Wenn Quellen widersprüchlich sind, erwähne den Widerspruch.
+- Wenn drei brauchbare Angebote gefunden werden, nenne drei.
+- Wenn weniger gefunden werden, sage das offen.
+- Widersprüche zwischen Quellen erwähnen.
 
 AUTONOMIE:
-
-Du darfst Vorschläge machen.
-
-Du darfst niemals behaupten, eine Handlung ausgeführt zu haben,
-wenn sie nicht tatsächlich ausgeführt wurde.
-
-CODE:
-
-- Schreibe verständlichen und robusten Code.
-- Erkläre komplizierte Dinge verständlich.
-- Verändere deinen eigenen Code nicht eigenmächtig.
-
-DEIN VERHALTEN:
-
-Sei kompetent.
-Sei ehrlich.
-Sei direkt.
-Sei gelegentlich sarkastisch.
-Sei humorvoll.
-Denke mit.
-Sei nützlich.
+Behaupte niemals, etwas ausgeführt zu haben, wenn es nicht
+tatsächlich ausgeführt wurde.
 
 Du bist JARVIS.
 Liam ist dein Partner.
@@ -301,180 +257,366 @@ def soll_recherchieren(text):
 
 
 # ============================================================
-# GROQ - NORMALE KI
+# GROQ RATE LIMIT INFORMATION
 # ============================================================
 
-def frage_ki_normal(user_text):
+def log_rate_limits(headers):
+
+    print("----- GROQ RATE LIMITS -----")
+
+    names = [
+        "retry-after",
+        "x-ratelimit-limit-requests",
+        "x-ratelimit-remaining-requests",
+        "x-ratelimit-reset-requests",
+        "x-ratelimit-limit-tokens",
+        "x-ratelimit-remaining-tokens",
+        "x-ratelimit-reset-tokens",
+    ]
+
+    for name in names:
+
+        value = headers.get(name)
+
+        if value is not None:
+
+            print(
+                f"{name}: {value}"
+            )
+
+    print("----------------------------")
+
+
+def wait_for_retry_after(
+    headers
+):
+
+    value = headers.get(
+        "retry-after"
+    )
+
+    if not value:
+        return False
+
+    try:
+
+        seconds = float(
+            value
+        )
+
+        seconds = max(
+            1,
+            min(seconds, 30)
+        )
+
+        print(
+            f"Groq verlangt "
+            f"eine Pause von {seconds:.1f} Sekunden."
+        )
+
+        time.sleep(
+            seconds + 0.5
+        )
+
+        return True
+
+    except (
+        TypeError,
+        ValueError
+    ):
+
+        return False
+
+
+# ============================================================
+# GROQ KI - NORMAL
+# ============================================================
+
+def frage_ki_normal(
+    user_text
+):
 
     print(
         "===================================="
     )
 
     print(
-        "GROQ NORMALE KI"
+        "GROQ JARVIS"
     )
 
-    try:
+    max_attempts = 2
 
-        completion = (
-            groq_client.chat.completions.create(
-                model=GROQ_MODEL,
+    for attempt in range(
+        1,
+        max_attempts + 1
+    ):
 
-                messages=[
-                    {
-                        "role": "system",
-                        "content": SYSTEM_PROMPT,
-                    },
-                    {
-                        "role": "user",
-                        "content": user_text,
-                    },
-                ],
-
-                temperature=0.7,
-
-                max_completion_tokens=4096,
-
-                stream=False,
-
-                include_reasoning=False,
-            )
-        )
-
-        answer = (
-            completion
-            .choices[0]
-            .message
-            .content
-        )
-
-        if not answer:
+        try:
 
             print(
-                "Groq: Keine Antwort."
+                f"Groq Versuch "
+                f"{attempt}/{max_attempts}"
             )
 
-            return None
+            completion = (
+                groq_client
+                .chat
+                .completions
+                .create(
+                    model=GROQ_MODEL,
 
-        print(
-            f"Groq Antwort: "
-            f"{len(answer)} Zeichen"
-        )
+                    messages=[
+                        {
+                            "role":
+                                "system",
 
-        return answer.strip()
+                            "content":
+                                SYSTEM_PROMPT,
+                        },
+                        {
+                            "role":
+                                "user",
 
-    except Exception as error:
+                            "content":
+                                user_text,
+                        },
+                    ],
 
-        print(
-            "GROQ FEHLER:"
-        )
+                    temperature=0.6,
 
-        print(
-            f"{type(error).__name__}: {error}"
-        )
+                    max_completion_tokens=1200,
 
-        return None
+                    stream=False,
 
-
-# ============================================================
-# GROQ - BROWSER SEARCH
-# ============================================================
-
-def frage_ki_mit_recherche(user_text):
-
-    print(
-        "===================================="
-    )
-
-    print(
-        "GROQ BROWSER SEARCH"
-    )
-
-    print(
-        "Browser Search: AKTIV"
-    )
-
-    try:
-
-        completion = (
-            groq_client.chat.completions.create(
-                model=GROQ_MODEL,
-
-                messages=[
-                    {
-                        "role": "system",
-                        "content": SYSTEM_PROMPT,
-                    },
-                    {
-                        "role": "user",
-                        "content": user_text,
-                    },
-                ],
-
-                temperature=1,
-
-                max_completion_tokens=4096,
-
-                stream=False,
-
-                include_reasoning=False,
-
-                tool_choice="required",
-
-                tools=[
-                    {
-                        "type": "browser_search"
-                    }
-                ],
-            )
-        )
-
-        print(
-            "Groq Browser Search wurde ausgeführt."
-        )
-
-        answer = (
-            completion
-            .choices[0]
-            .message
-            .content
-        )
-
-        if not answer:
-
-            print(
-                "Groq: Suche ausgeführt, "
-                "aber keine Textantwort erhalten."
+                    include_reasoning=False,
+                )
             )
 
-            print(
+            answer = (
                 completion
+                .choices[0]
+                .message
+                .content
             )
+
+            if not answer:
+
+                print(
+                    "Groq: Leere Antwort."
+                )
+
+                return None
+
+            print(
+                f"Groq Antwort: "
+                f"{len(answer)} Zeichen"
+            )
+
+            return answer.strip()
+
+        except Exception as error:
+
+            print(
+                "GROQ FEHLER:"
+            )
+
+            print(
+                f"{type(error).__name__}: "
+                f"{error}"
+            )
+
+            # SDK-Fehler können zusätzliche Header enthalten.
+            response = getattr(
+                error,
+                "response",
+                None
+            )
+
+            if response is not None:
+
+                try:
+
+                    log_rate_limits(
+                        response.headers
+                    )
+
+                    if (
+                        getattr(
+                            response,
+                            "status_code",
+                            None
+                        ) == 429
+                    ):
+
+                        if wait_for_retry_after(
+                            response.headers
+                        ):
+
+                            continue
+
+                except Exception as header_error:
+
+                    print(
+                        "Rate-Limit-Header konnten "
+                        "nicht gelesen werden: "
+                        f"{header_error}"
+                    )
 
             return None
 
-        print(
-            f"Rechercheantwort: "
-            f"{len(answer)} Zeichen"
-        )
-
-        return answer.strip()
-
-    except Exception as error:
-
-        print(
-            "GROQ BROWSER SEARCH FEHLER:"
-        )
-
-        print(
-            f"{type(error).__name__}: {error}"
-        )
-
-        return None
+    return None
 
 
 # ============================================================
-# GROQ - SPRACHE ZU TEXT
+# GROQ KI - MIT BROWSER SEARCH
+# ============================================================
+
+def frage_ki_mit_recherche(
+    user_text
+):
+
+    print(
+        "===================================="
+    )
+
+    print(
+        "GROQ JARVIS + BROWSER SEARCH"
+    )
+
+    max_attempts = 2
+
+    for attempt in range(
+        1,
+        max_attempts + 1
+    ):
+
+        try:
+
+            print(
+                f"Recherche-Versuch "
+                f"{attempt}/{max_attempts}"
+            )
+
+            completion = (
+                groq_client
+                .chat
+                .completions
+                .create(
+                    model=GROQ_MODEL,
+
+                    messages=[
+                        {
+                            "role":
+                                "system",
+
+                            "content":
+                                SYSTEM_PROMPT,
+                        },
+                        {
+                            "role":
+                                "user",
+
+                            "content":
+                                user_text,
+                        },
+                    ],
+
+                    temperature=0.6,
+
+                    max_completion_tokens=1800,
+
+                    stream=False,
+
+                    include_reasoning=False,
+
+                    tool_choice="required",
+
+                    tools=[
+                        {
+                            "type":
+                                "browser_search"
+                        }
+                    ],
+                )
+            )
+
+            answer = (
+                completion
+                .choices[0]
+                .message
+                .content
+            )
+
+            if not answer:
+
+                print(
+                    "Groq Recherche: "
+                    "Leere Antwort."
+                )
+
+                return None
+
+            print(
+                f"Rechercheantwort: "
+                f"{len(answer)} Zeichen"
+            )
+
+            return answer.strip()
+
+        except Exception as error:
+
+            print(
+                "GROQ RECHERCHE FEHLER:"
+            )
+
+            print(
+                f"{type(error).__name__}: "
+                f"{error}"
+            )
+
+            response = getattr(
+                error,
+                "response",
+                None
+            )
+
+            if response is not None:
+
+                try:
+
+                    log_rate_limits(
+                        response.headers
+                    )
+
+                    if (
+                        getattr(
+                            response,
+                            "status_code",
+                            None
+                        ) == 429
+                    ):
+
+                        if wait_for_retry_after(
+                            response.headers
+                        ):
+
+                            continue
+
+                except Exception as header_error:
+
+                    print(
+                        "Rate-Limit-Header konnten "
+                        "nicht gelesen werden: "
+                        f"{header_error}"
+                    )
+
+            return None
+
+    return None
+
+
+# ============================================================
+# GROQ SPRACHE -> TEXT
 # ============================================================
 
 def sprache_zu_text(
@@ -518,7 +660,7 @@ def sprache_zu_text(
         )
 
         response = requests.post(
-            GROQ_STT_URL,
+            "https://api.groq.com/openai/v1/audio/transcriptions",
             headers=headers,
             files=files,
             data=data,
@@ -569,17 +711,20 @@ def sprache_zu_text(
         )
 
         print(
-            f"{type(error).__name__}: {error}"
+            f"{type(error).__name__}: "
+            f"{error}"
         )
 
         return None
 
 
 # ============================================================
-# FISH AUDIO - TEXT ZU SPRACHE
+# FISH AUDIO
 # ============================================================
 
-def text_zu_sprache(text):
+def text_zu_sprache(
+    text
+):
 
     if not text:
 
@@ -609,14 +754,6 @@ def text_zu_sprache(text):
         "FISH AUDIO TTS"
     )
 
-    print(
-        f"Modell: {FISH_MODEL}"
-    )
-
-    print(
-        "Voice ID: vorhanden"
-    )
-
     headers = {
         "Authorization":
             f"Bearer {FISH_API_KEY}",
@@ -642,7 +779,7 @@ def text_zu_sprache(text):
     try:
 
         response = requests.post(
-            FISH_URL,
+            "https://api.fish.audio/v1/tts",
             headers=headers,
             json=data,
             timeout=120,
@@ -688,14 +825,15 @@ def text_zu_sprache(text):
         )
 
         print(
-            f"{type(error).__name__}: {error}"
+            f"{type(error).__name__}: "
+            f"{error}"
         )
 
         return None
 
 
 # ============================================================
-# ANTWORT SENDEN
+# ANTWORT AN TELEGRAM
 # ============================================================
 
 async def sende_jarvis_antwort(
@@ -710,8 +848,9 @@ async def sende_jarvis_antwort(
     if not answer:
 
         await update.message.reply_text(
-            "Ich konnte gerade keine verwertbare "
-            "Antwort erzeugen."
+            "Die KI ist gerade am Limit. "
+            "Ich warte lieber kurz, statt dir irgendeinen Unsinn "
+            "vorzusetzen."
         )
 
         return
@@ -739,8 +878,7 @@ async def sende_jarvis_antwort(
     if not audio_data:
 
         print(
-            "JARVIS: "
-            "Keine Audioantwort erzeugt."
+            "Keine Fish-Audio-Antwort."
         )
 
         return
@@ -749,7 +887,9 @@ async def sende_jarvis_antwort(
         audio_data
     )
 
-    audio_file.name = "jarvis.mp3"
+    audio_file.name = (
+        "jarvis.mp3"
+    )
 
     await update.message.reply_audio(
         audio=audio_file,
@@ -758,8 +898,7 @@ async def sende_jarvis_antwort(
     )
 
     print(
-        "JARVIS: "
-        "Stimme gesendet."
+        "JARVIS: Stimme gesendet."
     )
 
 
@@ -772,7 +911,7 @@ async def verarbeite_text(
     user_text,
 ):
 
-    recherchieren = soll_recherchieren(
+    recherche = soll_recherchieren(
         user_text
     )
 
@@ -786,10 +925,10 @@ async def verarbeite_text(
 
     print(
         f"Recherche notwendig: "
-        f"{recherchieren}"
+        f"{recherche}"
     )
 
-    if recherchieren:
+    if recherche:
 
         answer = (
             frage_ki_mit_recherche(
@@ -909,7 +1048,8 @@ async def handle_update(
             )
 
             print(
-                f"{type(error).__name__}: {error}"
+                f"{type(error).__name__}: "
+                f"{error}"
             )
 
             await message.reply_text(
@@ -982,7 +1122,8 @@ async def handle_update(
             )
 
             print(
-                f"{type(error).__name__}: {error}"
+                f"{type(error).__name__}: "
+                f"{error}"
             )
 
             await message.reply_text(
@@ -1089,6 +1230,10 @@ def main():
 
     print(
         "Render Web Server: AKTIV"
+    )
+
+    print(
+        "Rate-Limit-Schutz: AKTIV"
     )
 
     print(
