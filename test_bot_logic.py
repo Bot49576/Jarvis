@@ -9,6 +9,7 @@ from bot import (
     interaction_input,
     interaction_sources,
     message_contents,
+    pronounce_version_numbers,
     remember_command,
     remove_matching_facts,
     source_message,
@@ -109,10 +110,15 @@ class JarvisLogicTests(unittest.TestCase):
         spoken = text_for_speech(answer)
         self.assertEqual(
             spoken,
-            "Die stabile Version ist 26.2. Version 26.3 ist noch ein Snapshot.",
+            "Die stabile Version ist 26 Punkt 2. "
+            "Version 26 Punkt 3 ist noch ein Snapshot.",
         )
         self.assertNotIn("http", spoken)
         self.assertNotIn("Quellen", spoken)
+
+    def test_version_pronunciation_does_not_change_dates_or_normal_decimals(self):
+        text = "Am 16.06.2026 kostete es 3.5 Euro. Ohne Versionskontext."
+        self.assertEqual(pronounce_version_numbers(text), text)
 
     def test_speech_text_is_shortened_at_sentence_boundary(self):
         answer = " ".join(f"Satz {index}." for index in range(1, 8))
