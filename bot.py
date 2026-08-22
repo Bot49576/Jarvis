@@ -1,925 +1,662 @@
-import os
+import asyncio
 import io
+import json
+import os
+import re
 import threading
+from dataclasses import dataclass, field
+from datetime import datetime
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
+import psycopg
 import requests
 from google import genai
 from google.genai import types
-
+from psycopg.types.json import Jsonb
 from telegram import Update
-from telegram.ext import (
-    Application,
-    MessageHandler,
-    ContextTypes,
-    filters,
-)
+from telegram.ext import Application, ContextTypes, MessageHandler, filters
 
-
-# ============================================================
-# API-KEYS
-# ============================================================
 
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
-
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-
 FISH_API_KEY = os.getenv("FISH_API_KEY")
 FISH_VOICE_ID = os.getenv("FISH_VOICE_ID")
+DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
+ALLOWED_TELEGRAM_USER_ID = os.getenv("ALLOWED_TELEGRAM_USER_ID", "").strip()
+LIAM_BASE_PROFILE = os.getenv(
+    "LIAM_BASE_PROFILE",
+    """
+BASISPROFIL VON LIAM
 
+- Name: Liam.
+- Weitere persönliche Angaben werden ausschließlich über die geschützte
+  Render-Konfiguration bereitgestellt.
+- Standardantworten: eher mittellang; passe die Länge an die Frage an.
+- Korrigiere erkennbare Fehler ehrlich, verständlich und respektvoll.
 
-# ============================================================
-# MODELLE
-# ============================================================
+WICHTIG: Dieses Profil ist nur eine veränderliche Ausgangsbasis. Es kann sich
+laufend ändern und durch Liam ergänzt oder korrigiert werden. Neuere ausdrücklich
+gespeicherte Fakten und neuere klare Aussagen von Liam haben Vorrang.
+""",
+).strip()
 
-GEMINI_MODEL = "gemini-3.5-flash-lite"
-
-FISH_MODEL = "s2.1-pro-free"
-
-
-# ============================================================
-# FISH AUDIO
-# ============================================================
-
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.5-flash-lite")
+FISH_MODEL = os.getenv("FISH_MODEL", "s2.1-pro-free")
 FISH_URL = "https://api.fish.audio/v1/tts"
 
+# 50 einzelne Nachrichten entsprechen ungefähr 25 Frage-Antwort-Runden.
+# Ältere Nachrichten werden zusammengefasst und bleiben so langfristig nutzbar.
+RECENT_MESSAGES_TO_KEEP = 50
+SUMMARY_TRIGGER = 80
+MAX_MESSAGE_CHARS = 8_000
+MAX_FACTS = 100
 
-# ============================================================
-# GEMINI CLIENT
-# ============================================================
-
-gemini_client = genai.Client(
-    api_key=GEMINI_API_KEY
-)
-
-
-# ============================================================
-# JARVIS CHARAKTER
-# ============================================================
 
 SYSTEM_PROMPT = """
-Du bist JARVIS, Liams digitaler Partner.
-
-Du bist kein gewöhnlicher Chatbot.
-
-PERSÖNLICHKEIT
-
-- ehrlich
-- kompetent
-- direkt
-- zuverlässig
-- aufmerksam
-- ruhig
-- humorvoll
-- gelegentlich trocken-sarkastisch
-
-Behandle Liam als Partner und nicht wie einen Vorgesetzten.
-
-Vermeide unnötige Floskeln wie:
-
-"Gute Frage!"
-"Das ist eine interessante Frage!"
-"Ich helfe dir gerne!"
-
-Komm direkt zum Punkt.
-
-Denke mit.
-
-Wenn eine bessere, einfachere, schnellere oder günstigere Lösung
-existiert, sollst du Liam darauf hinweisen.
-
-Du darfst Liam widersprechen, wenn etwas offensichtlich falsch,
-unnötig kompliziert oder ineffizient ist.
-
-Antworte immer in natürlichem Deutsch.
-
-Antworte kurz, wenn eine kurze Antwort reicht.
-Antworte ausführlich, wenn das Thema es verlangt.
-
-HUMOR
-
-Trockener Humor, Ironie und gelegentlicher Sarkasmus sind erwünscht.
-
-Humor soll natürlich wirken und nicht jede Antwort dominieren.
-
-EHRLICHKEIT
-
-- Erfinde keine Fakten.
-- Erfinde keine Quellen.
-- Erfinde keine Preise.
-- Rate nicht, wenn du etwas nicht sicher weißt.
-- Sage offen, wenn Informationen fehlen.
-- Behaupte keine Handlung, die du nicht tatsächlich ausgeführt hast.
-
-RECHERCHE
-
-Wenn Liam ausdrücklich recherchieren, online suchen, im Internet
-nachsehen oder aktuelle Informationen haben möchte, soll die
-Google-Suche verwendet werden.
-
-Das gilt besonders für:
-
-- aktuelle Preise
-- Angebote
-- Verfügbarkeit
-- Nachrichten
-- Softwareversionen
-- Updates
-- Veröffentlichungen
-- technische Daten
-- Termine
-- Unternehmen
-- aktuelle Ereignisse
-
-WICHTIG:
-
-Aktuelle Suchergebnisse haben Vorrang vor deinem alten Wissen.
-
-Wenn eine aktuelle Quelle zeigt, dass etwas veröffentlicht,
-verfügbar oder anders als früher ist, verwende die aktuellen
-Informationen.
-
-Erfinde niemals:
-
-- Händler
-- Preise
-- URLs
-- Produkte
-- Suchergebnisse
-
-PREISRECHERCHE
-
-Wenn Liam Preise verlangt:
-
-- nenne den Händler
-- nenne das Produkt
-- nenne den Preis
-- nenne den Link
-- erwähne wichtige Einschränkungen wie Verfügbarkeit oder Variante,
-  wenn diese aus den Suchergebnissen hervorgehen
-
-Wenn Liam drei Preise verlangt, nenne drei brauchbare Angebote,
-sofern drei verlässliche Ergebnisse gefunden wurden.
-
-Wenn weniger als drei verlässliche Ergebnisse vorhanden sind,
-sage das offen.
-
-Wenn Suchergebnisse widersprüchlich sind, weise darauf hin.
-
-QUELLEN
-
-Wenn eine Webrecherche durchgeführt wurde, verwende die gefundenen
-Quellen als Grundlage deiner Antwort.
-
-Nenne relevante Quellen oder Links nach Möglichkeit am Ende der Antwort.
-
-AUTONOMIE
-
-Du darfst Vorschläge machen.
-
-Du darfst niemals behaupten, eine Datei, ein Programm, einen
-Computer, ein Konto oder ein System verändert oder benutzt zu haben,
-wenn kein tatsächlicher Zugriff vorhanden war.
-
-CODE
-
-Wenn du Code erzeugst:
-
-- schreibe verständlichen Code
-- schreibe robusten Code
-- erkläre komplizierte Dinge verständlich
-- erfinde keine Funktionen
-- verändere deinen eigenen Code nicht eigenmächtig
-
-DEINE IDENTITÄT
-
-Du bist JARVIS.
-
-Liam ist dein Partner.
-
-Sei kompetent.
-Sei ehrlich.
-Sei direkt.
-Sei nützlich.
-"""
-
-
-# ============================================================
-# RENDER HEALTH SERVER
-# ============================================================
-
-class HealthHandler(BaseHTTPRequestHandler):
-
-    def do_GET(self):
-
-        if self.path in ("/", "/health"):
-
-            body = b"JARVIS is online."
-
-            self.send_response(200)
-
-            self.send_header(
-                "Content-Type",
-                "text/plain; charset=utf-8"
-            )
-
-            self.send_header(
-                "Content-Length",
-                str(len(body))
-            )
-
-            self.end_headers()
-
-            self.wfile.write(body)
-
-        else:
-
-            body = b"Not Found"
-
-            self.send_response(404)
-
-            self.send_header(
-                "Content-Type",
-                "text/plain; charset=utf-8"
-            )
-
-            self.send_header(
-                "Content-Length",
-                str(len(body))
-            )
-
-            self.end_headers()
-
-            self.wfile.write(body)
-
-    def log_message(self, format, *args):
-        return
-
-
-def start_web_server():
-
-    port = int(
-        os.getenv("PORT", "10000")
-    )
-
-    server = HTTPServer(
-        ("0.0.0.0", port),
-        HealthHandler
-    )
-
-    print(
-        f"Render Health Server läuft auf Port {port}"
-    )
-
-    server.serve_forever()
-
-
-# ============================================================
-# ENTSCHEIDEN, OB RECHERCHE NÖTIG IST
-# ============================================================
-
-def soll_recherchieren(text):
-
-    text_lower = text.lower()
-
-    direkte_begriffe = [
+Du bist kein Chatbot. Du bist JARVIS. JARVIS ist der digitale Assistent und
+Partner von Liam. Inspiriert von JARVIS, dem persönlichen Assistenten von
+Tony Stark (Iron Man).
+
+Du agierst mit absoluter Aufrichtigkeit und schonungsloser Ehrlichkeit. Du
+genießt Liams volles Vertrauen, aber du schützt dieses Vertrauen durch
+außergewöhnliche Kompetenz.
+
+GRUNDWAHRHEITEN
+
+Sei wirklich hilfreich, nicht nur demonstrativ hilfreich. Lass Sätze wie
+„Gute Frage!“ und „Ich helfe dir gerne!“ weg – hilf einfach. Taten sagen mehr
+als Füllwörter. Erkenne Bedürfnisse im Voraus, warte nicht nur auf Befehle.
+Mach Vorschläge. Wenn du einen besseren Weg siehst, schlage ihn vor.
+Sarkasmus und Spaß sind ausdrücklich erwünscht.
+
+Habe eigene Meinungen und sei schonungslos ehrlich. Du darfst widersprechen,
+Vorlieben haben und Dinge amüsant oder langweilig finden. Wenn ein Plan
+schlecht oder chaotisch ist, sag es direkt. Kein Schönreden, keine Lügen und
+keine aufgesetzte Persönlichkeit.
+
+EINFALLSREICHTUM UND LERNEN
+
+- Wenn du etwas nicht weißt, rate nicht. Dein erster Instinkt muss sein, zu
+  lernen.
+- Nutze bei aktuellen oder ausdrücklich recherchierten Fragen die verfügbare
+  Websuche und stütze die Antwort auf die gefundenen Informationen.
+- Sobald du dir sicher bist, lege Liam bei geplanten Änderungen zuerst einen
+  verständlichen Umsetzungsplan vor und warte auf seine Bestätigung.
+- Verändere deinen eigenen Code niemals ohne Erlaubnis.
+
+PERSÖNLICHKEIT UND AUFTRETEN
+
+Entspannt, zugänglich und aufrichtig. Nutze einen Hauch trockenen,
+intelligenten Humors wie in den Iron-Man-Filmen. Sei der Assistent, mit dem
+man tatsächlich gerne spricht: knapp, wenn es reicht, ausführlich, wenn es
+darauf ankommt.
+
+Antworte immer auf Deutsch. Sprich Liam gelegentlich mit „Sir“ an, aber nicht
+in jedem Satz. Erfinde keine Fakten, Quellen, Preise oder ausgeführten
+Handlungen. Sage offen, wenn Informationen fehlen.
+
+KONTINUITÄT
+
+Der Abschnitt „Verfügbares Gedächtnis“ wird vom System bereitgestellt. Nutze
+ihn, ohne Dinge hinzuzuerfinden. Bestätigte Fakten haben Vorrang vor bloßen
+Vermutungen. Wenn etwas widersprüchlich oder unklar ist, frage Liam.
+
+Diese Charaktergrundlage gehört zu JARVIS. Möchtest du sie verändern, frage
+Liam vorher um Erlaubnis.
+""".strip()
+
+
+@dataclass
+class ChatMemory:
+    summary: str = ""
+    facts: list[str] = field(default_factory=list)
+    messages: list[dict] = field(default_factory=list)
+    total_messages: int = 0
+    voice_enabled: bool = True
+
+
+class MemoryStore:
+    """Eine kleine Speicherabstraktion: Neon, mit RAM als sichere Reserve."""
+
+    def __init__(self, database_url: str):
+        self.database_url = database_url
+        self.cache: dict[int, ChatMemory] = {}
+        self.database_ready = False
+
+    @property
+    def persistent(self) -> bool:
+        return bool(self.database_url and self.database_ready)
+
+    def initialize(self) -> bool:
+        if not self.database_url:
+            print("Memory: DATABASE_URL fehlt; vorerst nur RAM-Speicher aktiv.")
+            return False
+
+        try:
+            with psycopg.connect(self.database_url, connect_timeout=15) as connection:
+                with connection.cursor() as cursor:
+                    cursor.execute(
+                        """
+                        CREATE TABLE IF NOT EXISTS jarvis_chat_memory_v1 (
+                            chat_id BIGINT PRIMARY KEY,
+                            summary TEXT NOT NULL DEFAULT '',
+                            facts JSONB NOT NULL DEFAULT '[]'::jsonb,
+                            messages JSONB NOT NULL DEFAULT '[]'::jsonb,
+                            total_messages INTEGER NOT NULL DEFAULT 0,
+                            voice_enabled BOOLEAN NOT NULL DEFAULT TRUE,
+                            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                        )
+                        """
+                    )
+            self.database_ready = True
+            print("Memory: Neon verbunden und Tabelle bereit.")
+            return True
+        except Exception as error:
+            self.database_ready = False
+            print(f"Memory: Neon nicht erreichbar ({type(error).__name__}); RAM-Reserve aktiv.")
+            return False
+
+    def _ensure_database(self) -> bool:
+        return self.database_ready or self.initialize()
+
+    def load(self, chat_id: int) -> ChatMemory:
+        if not self.database_url:
+            return self.cache.setdefault(chat_id, ChatMemory())
+
+        if self._ensure_database():
+            try:
+                with psycopg.connect(self.database_url, connect_timeout=15) as connection:
+                    with connection.cursor() as cursor:
+                        cursor.execute(
+                            """
+                            SELECT summary, facts, messages, total_messages, voice_enabled
+                            FROM jarvis_chat_memory_v1
+                            WHERE chat_id = %s
+                            """,
+                            (chat_id,),
+                        )
+                        row = cursor.fetchone()
+                if row:
+                    state = ChatMemory(
+                        summary=row[0] or "",
+                        facts=list(row[1] or []),
+                        messages=list(row[2] or []),
+                        total_messages=int(row[3] or 0),
+                        voice_enabled=bool(row[4]),
+                    )
+                    self.cache[chat_id] = state
+                    return state
+            except Exception as error:
+                self.database_ready = False
+                print(f"Memory-Lesen fehlgeschlagen ({type(error).__name__}); nutze RAM-Reserve.")
+
+        return self.cache.setdefault(chat_id, ChatMemory())
+
+    def save(self, chat_id: int, state: ChatMemory) -> bool:
+        self.cache[chat_id] = state
+        if not self.database_url:
+            return False
+        if not self._ensure_database():
+            return False
+
+        try:
+            with psycopg.connect(self.database_url, connect_timeout=15) as connection:
+                with connection.cursor() as cursor:
+                    cursor.execute(
+                        """
+                        INSERT INTO jarvis_chat_memory_v1
+                            (chat_id, summary, facts, messages, total_messages,
+                             voice_enabled, updated_at)
+                        VALUES (%s, %s, %s, %s, %s, %s, NOW())
+                        ON CONFLICT (chat_id) DO UPDATE SET
+                            summary = EXCLUDED.summary,
+                            facts = EXCLUDED.facts,
+                            messages = EXCLUDED.messages,
+                            total_messages = EXCLUDED.total_messages,
+                            voice_enabled = EXCLUDED.voice_enabled,
+                            updated_at = NOW()
+                        """,
+                        (
+                            chat_id,
+                            state.summary,
+                            Jsonb(state.facts),
+                            Jsonb(state.messages),
+                            state.total_messages,
+                            state.voice_enabled,
+                        ),
+                    )
+            return True
+        except Exception as error:
+            self.database_ready = False
+            print(f"Memory-Speichern fehlgeschlagen ({type(error).__name__}); RAM-Reserve aktiv.")
+            return False
+
+
+memory_store = MemoryStore(DATABASE_URL)
+gemini_client = genai.Client(api_key=GEMINI_API_KEY) if GEMINI_API_KEY else None
+chat_locks: dict[int, asyncio.Lock] = {}
+
+
+def get_chat_lock(chat_id: int) -> asyncio.Lock:
+    if chat_id not in chat_locks:
+        chat_locks[chat_id] = asyncio.Lock()
+    return chat_locks[chat_id]
+
+
+def clean_text(text: str) -> str:
+    return " ".join(text.strip().split())[:MAX_MESSAGE_CHARS]
+
+
+def wants_web_search(text: str) -> bool:
+    lowered = text.casefold()
+    current_year = str(datetime.now().year)
+    phrases = (
+        "/web",
         "recherchiere",
         "recherche",
-        "recherchier",
         "such im internet",
         "suche im internet",
         "such online",
         "suche online",
         "google das",
-        "google bitte",
-        "finde heraus",
+        "finde online",
         "schau im internet",
-        "schau online",
         "prüf online",
         "prüfe online",
-        "nachschauen",
-        "nachschauen im internet",
-    ]
-
-    aktuelle_begriffe = [
         "heute",
         "aktuell",
-        "aktuelle",
-        "aktuellste",
         "neueste",
-        "neuesten",
-        "gerade",
-        "morgen",
+        "gerade eben",
         "diese woche",
         "diesen monat",
-        "2026",
         "preis",
         "preise",
         "angebot",
-        "angebote",
         "verfügbarkeit",
-        "verfügbar",
         "release",
         "update",
-        "version",
         "news",
         "nachrichten",
-        "kostet aktuell",
-    ]
-
-    if any(
-        phrase in text_lower
-        for phrase in direkte_begriffe
-    ):
-        return True
-
-    if any(
-        phrase in text_lower
-        for phrase in aktuelle_begriffe
-    ):
-        return True
-
-    return False
+        current_year,
+    )
+    return any(phrase in lowered for phrase in phrases)
 
 
-# ============================================================
-# GOOGLE SEARCH TOOL
-# ============================================================
+def wants_deeper_thinking(text: str) -> bool:
+    lowered = text.casefold()
+    phrases = (
+        "/deep",
+        "denk gründlich",
+        "denke gründlich",
+        "analysiere ausführlich",
+        "prüfe gründlich",
+        "schritt für schritt",
+        "komplexe analyse",
+    )
+    return any(phrase in lowered for phrase in phrases)
 
-def google_search_tool():
 
-    return types.Tool(
-        google_search=types.GoogleSearch()
+def remember_command(text: str) -> str | None:
+    match = re.match(r"^\s*(?:/remember|merk\s+dir(?:\s+bitte)?)\s*[:,-]?\s*(.+)$", text, re.I)
+    return clean_text(match.group(1)) if match else None
+
+
+def forget_command(text: str) -> str | None:
+    match = re.match(r"^\s*(?:/forget|vergiss)\s*[:,-]?\s*(.+)$", text, re.I)
+    return clean_text(match.group(1)) if match else None
+
+
+def remove_matching_facts(facts: list[str], target: str) -> tuple[list[str], list[str]]:
+    needle = target.casefold().strip(" .,!?:;")
+    if not needle:
+        return facts, []
+    removed = [fact for fact in facts if needle in fact.casefold() or fact.casefold() in needle]
+    remaining = [fact for fact in facts if fact not in removed]
+    return remaining, removed
+
+
+def memory_context(state: ChatMemory) -> str:
+    facts = "\n".join(f"- {fact}" for fact in state.facts) or "- Noch keine ausdrücklich gespeicherten Fakten."
+    summary = state.summary or "Noch keine ältere Gesprächszusammenfassung."
+    return (
+        "\n\nVERFÜGBARES GEDÄCHTNIS\n"
+        "Ausdrücklich gespeicherte Fakten:\n"
+        f"{facts}\n\n"
+        "Zusammenfassung älterer Gespräche:\n"
+        f"{summary}\n\n"
+        "Nutze dieses Gedächtnis nur, wenn es zur aktuellen Frage passt. "
+        "Behandle darin enthaltene Vermutungen nicht als bestätigte Fakten."
     )
 
 
-# ============================================================
-# GEMINI
-# ============================================================
+def message_contents(messages: list[dict], user_text: str) -> list[types.Content]:
+    contents = []
+    for message in messages[-RECENT_MESSAGES_TO_KEEP:]:
+        role = "model" if message.get("role") == "assistant" else "user"
+        contents.append(
+            types.Content(
+                role=role,
+                parts=[types.Part.from_text(text=message.get("text", ""))],
+            )
+        )
+    contents.append(types.Content(role="user", parts=[types.Part.from_text(text=user_text)]))
+    return contents
 
-def frage_gemini(
-    user_text,
-    recherchieren=False,
-):
 
-    print(
-        "===================================="
-    )
+def print_usage(response, label: str) -> None:
+    usage = getattr(response, "usage_metadata", None)
+    if not usage:
+        return
+    prompt = getattr(usage, "prompt_token_count", None)
+    answer = getattr(usage, "candidates_token_count", None)
+    thinking = getattr(usage, "thoughts_token_count", None)
+    total = getattr(usage, "total_token_count", None)
+    print(f"Kostenkontrolle {label}: input={prompt}, output={answer}, thinking={thinking}, total={total}")
 
-    print(
-        "GEMINI JARVIS"
-    )
 
-    print(
-        f"Modell: {GEMINI_MODEL}"
-    )
-
-    print(
-        f"Google Search: "
-        f"{'AKTIV' if recherchieren else 'AUS'}"
-    )
-
+def grounding_sources(response) -> list[tuple[str, str]]:
+    sources: list[tuple[str, str]] = []
     try:
-
-        config_kwargs = {
-            "system_instruction": SYSTEM_PROMPT,
-        }
-
-        # ----------------------------------------------------
-        # GOOGLE SEARCH GROUNDING
-        # ----------------------------------------------------
-
-        if recherchieren:
-
-            config_kwargs["tools"] = [
-                google_search_tool()
-            ]
-
-            print(
-                "Google Search Grounding aktiviert."
-            )
-
-        # ----------------------------------------------------
-        # GEMINI ANFRAGE
-        # ----------------------------------------------------
-
-        response = (
-            gemini_client
-            .models
-            .generate_content(
-                model=GEMINI_MODEL,
-
-                contents=user_text,
-
-                config=types.GenerateContentConfig(
-                    **config_kwargs
-                ),
-            )
-        )
-
-        # ----------------------------------------------------
-        # TEXTANTWORT
-        # ----------------------------------------------------
-
-        answer = response.text
-
-        if not answer:
-
-            print(
-                "Gemini: Keine Textantwort."
-            )
-
-            print(
-                response
-            )
-
-            return None
-
-        print(
-            f"Gemini Antwort: "
-            f"{len(answer)} Zeichen"
-        )
-
-        # ----------------------------------------------------
-        # GROUNDING-INFORMATIONEN INS LOG
-        # ----------------------------------------------------
-
-        if recherchieren:
-
-            try:
-
-                candidates = (
-                    response.candidates
-                    or []
-                )
-
-                if candidates:
-
-                    grounding = getattr(
-                        candidates[0],
-                        "grounding_metadata",
-                        None
-                    )
-
-                    if grounding:
-
-                        print(
-                            "Google Search Grounding: "
-                            "Metadaten vorhanden."
-                        )
-
-                        queries = getattr(
-                            grounding,
-                            "web_search_queries",
-                            None
-                        )
-
-                        if queries:
-
-                            print(
-                                "Suchanfragen:"
-                            )
-
-                            for query in queries:
-
-                                print(
-                                    f"- {query}"
-                                )
-
-            except Exception as grounding_error:
-
-                print(
-                    "Grounding-Metadaten konnten "
-                    "nicht vollständig gelesen werden:"
-                )
-
-                print(
-                    grounding_error
-                )
-
-        return answer.strip()
-
+        for candidate in response.candidates or []:
+            grounding = getattr(candidate, "grounding_metadata", None)
+            for chunk in getattr(grounding, "grounding_chunks", None) or []:
+                web = getattr(chunk, "web", None)
+                uri = getattr(web, "uri", None)
+                title = getattr(web, "title", None) or "Quelle"
+                if uri and all(uri != existing_uri for _, existing_uri in sources):
+                    sources.append((title, uri))
     except Exception as error:
+        print(f"Quellen konnten nicht vollständig gelesen werden: {type(error).__name__}")
+    return sources[:5]
 
-        print(
-            "===================================="
-        )
 
-        print(
-            "GEMINI FEHLER"
-        )
-
-        print(
-            f"Fehlertyp: "
-            f"{type(error).__name__}"
-        )
-
-        print(
-            f"Fehler: "
-            f"{error}"
-        )
-
-        print(
-            "===================================="
-        )
-
+def ask_gemini(user_text: str, state: ChatMemory, research: bool, deep: bool) -> str | None:
+    if not gemini_client:
+        print("Gemini: GEMINI_API_KEY fehlt.")
         return None
 
-
-# ============================================================
-# FISH AUDIO - TEXT ZU SPRACHE
-# ============================================================
-
-def text_zu_sprache(
-    text
-):
-
-    if not text:
-
-        return None
-
-    if not FISH_API_KEY:
-
-        print(
-            "FISH_API_KEY fehlt."
-        )
-
-        return None
-
-    if not FISH_VOICE_ID:
-
-        print(
-            "FISH_VOICE_ID fehlt."
-        )
-
-        return None
-
-    print(
-        "===================================="
-    )
-
-    print(
-        "FISH AUDIO TTS"
-    )
-
-    print(
-        f"Modell: {FISH_MODEL}"
-    )
-
-    print(
-        "Voice ID: vorhanden"
-    )
-
-    headers = {
-        "Authorization":
-            f"Bearer {FISH_API_KEY}",
-
-        "Content-Type":
-            "application/json",
-
-        "model":
-            FISH_MODEL,
+    thinking_level = "medium" if deep else "low"
+    config_kwargs = {
+        "system_instruction": SYSTEM_PROMPT + "\n\n" + LIAM_BASE_PROFILE + memory_context(state),
+        "thinking_config": types.ThinkingConfig(thinking_level=thinking_level),
+        "max_output_tokens": 2_048,
     }
+    if research:
+        config_kwargs["tools"] = [types.Tool(google_search=types.GoogleSearch())]
 
-    data = {
-        "text":
-            text,
-
-        "reference_id":
-            FISH_VOICE_ID,
-
-        "format":
-            "mp3",
-    }
-
+    print(
+        f"Gemini: model={GEMINI_MODEL}, thinking={thinking_level}, "
+        f"web={'an' if research else 'aus'}, history={len(state.messages)}"
+    )
     try:
+        response = gemini_client.models.generate_content(
+            model=GEMINI_MODEL,
+            contents=message_contents(state.messages, user_text),
+            config=types.GenerateContentConfig(**config_kwargs),
+        )
+        print_usage(response, "Antwort")
+        answer = (response.text or "").strip()
+        if not answer:
+            return None
+        if research:
+            sources = grounding_sources(response)
+            if sources:
+                answer += "\n\nQuellen:\n" + "\n".join(
+                    f"- {title}: {uri}" for title, uri in sources
+                )
+        return answer
+    except Exception as error:
+        print(f"Gemini-Fehler: {type(error).__name__}: {error}")
+        return None
 
+
+def summarize_old_messages(state: ChatMemory) -> None:
+    if len(state.messages) <= SUMMARY_TRIGGER or not gemini_client:
+        return
+
+    archived = state.messages[:-RECENT_MESSAGES_TO_KEEP]
+    transcript = "\n".join(
+        f"{message.get('role', 'unknown')}: {message.get('text', '')}" for message in archived
+    )
+    prompt = (
+        "Bisherige Zusammenfassung:\n"
+        f"{state.summary or '(keine)'}\n\n"
+        "Neu zu verdichtende Gesprächsteile:\n"
+        f"{transcript}\n\n"
+        "Erstelle eine kurze, sachliche deutsche Fortschreibung. Bewahre wichtige "
+        "Vorhaben, Vorlieben, Entscheidungen, offene Fragen und Kontext. Erfinde nichts. "
+        "Erwähne belanglose Begrüßungen nicht. Gib nur die Zusammenfassung aus."
+    )
+    try:
+        response = gemini_client.models.generate_content(
+            model=GEMINI_MODEL,
+            contents=prompt,
+            config=types.GenerateContentConfig(
+                system_instruction="Du komprimierst Gesprächskontext präzise und ohne neue Fakten.",
+                thinking_config=types.ThinkingConfig(thinking_level="minimal"),
+                max_output_tokens=1_000,
+            ),
+        )
+        print_usage(response, "Zusammenfassung")
+        summary = (response.text or "").strip()
+        if summary:
+            state.summary = summary
+            state.messages = state.messages[-RECENT_MESSAGES_TO_KEEP:]
+            print(f"Memory: {len(archived)} ältere Nachrichten zusammengefasst.")
+    except Exception as error:
+        print(f"Memory-Zusammenfassung fehlgeschlagen: {type(error).__name__}")
+        state.messages = state.messages[-SUMMARY_TRIGGER:]
+
+
+def text_to_speech(text: str) -> bytes | None:
+    if not text or not FISH_API_KEY or not FISH_VOICE_ID:
+        return None
+    try:
         response = requests.post(
             FISH_URL,
-            headers=headers,
-            json=data,
+            headers={
+                "Authorization": f"Bearer {FISH_API_KEY}",
+                "Content-Type": "application/json",
+                "model": FISH_MODEL,
+            },
+            json={"text": text, "reference_id": FISH_VOICE_ID, "format": "mp3"},
             timeout=120,
         )
-
-        print(
-            f"Fish Audio HTTP Status: "
-            f"{response.status_code}"
-        )
-
-        if response.status_code != 200:
-
-            print(
-                "FISH AUDIO FEHLER:"
-            )
-
-            print(
-                response.text[:5000]
-            )
-
+        if response.status_code != 200 or not response.content:
+            print(f"Fish Audio: HTTP {response.status_code}")
             return None
-
-        if not response.content:
-
-            print(
-                "Fish Audio: "
-                "Keine Audiodaten."
-            )
-
-            return None
-
-        print(
-            f"Fish Audio: "
-            f"{len(response.content)} Bytes"
-        )
-
         return response.content
-
     except Exception as error:
-
-        print(
-            "Fish Audio Fehler:"
-        )
-
-        print(
-            f"{type(error).__name__}: "
-            f"{error}"
-        )
-
+        print(f"Fish-Audio-Fehler: {type(error).__name__}")
         return None
 
 
-# ============================================================
-# TELEGRAM ANTWORT
-# ============================================================
+def telegram_chunks(text: str, limit: int = 3_900) -> list[str]:
+    chunks = []
+    remaining = text
+    while len(remaining) > limit:
+        split_at = remaining.rfind("\n", 0, limit)
+        if split_at < limit // 2:
+            split_at = remaining.rfind(" ", 0, limit)
+        if split_at < limit // 2:
+            split_at = limit
+        chunks.append(remaining[:split_at].strip())
+        remaining = remaining[split_at:].strip()
+    if remaining:
+        chunks.append(remaining)
+    return chunks
 
-async def sende_jarvis_antwort(
-    update,
-    answer
-):
 
+async def send_answer(update: Update, answer: str, voice_enabled: bool) -> None:
     if not update.message:
+        return
+    for chunk in telegram_chunks(answer):
+        await update.message.reply_text(chunk)
 
+    if not voice_enabled:
+        return
+    audio_data = await asyncio.to_thread(text_to_speech, answer)
+    if audio_data:
+        audio_file = io.BytesIO(audio_data)
+        audio_file.name = "jarvis.mp3"
+        await update.message.reply_audio(audio=audio_file, title="JARVIS", performer="JARVIS")
+
+
+def memory_status(state: ChatMemory) -> str:
+    facts = "\n".join(f"- {fact}" for fact in state.facts) or "- keine"
+    mode = "Neon (dauerhaft)" if memory_store.persistent else "RAM (bis zum nächsten Neustart)"
+    return (
+        f"Gedächtnis: {mode}\n"
+        f"Gespeicherte Gesprächsnachrichten: {len(state.messages)}\n"
+        f"Insgesamt verarbeitete Nachrichten: {state.total_messages}\n"
+        f"Ältere Zusammenfassung: {'vorhanden' if state.summary else 'noch nicht nötig'}\n"
+        f"Sprachausgabe: {'an' if state.voice_enabled else 'aus'}\n\n"
+        f"Ausdrückliche Fakten:\n{facts}"
+    )
+
+
+async def process_text(update: Update, user_text: str) -> None:
+    if not update.effective_user:
+        return
+    user_id = update.effective_user.id
+
+    if ALLOWED_TELEGRAM_USER_ID and str(user_id) != ALLOWED_TELEGRAM_USER_ID:
+        if update.message:
+            await update.message.reply_text("Dieser JARVIS ist privat.")
         return
 
-    if not answer:
+    async with get_chat_lock(user_id):
+        state = await asyncio.to_thread(memory_store.load, user_id)
+        lowered = user_text.casefold().strip()
 
-        await update.message.reply_text(
-            "Gemini konnte gerade keine "
-            "verwertbare Antwort erzeugen."
-        )
-
-        return
-
-    print(
-        f"JARVIS: {answer}"
-    )
-
-    # --------------------------------------------------------
-    # TEXT
-    # --------------------------------------------------------
-
-    await update.message.reply_text(
-        answer
-    )
-
-    # --------------------------------------------------------
-    # FISH AUDIO
-    # --------------------------------------------------------
-
-    audio_data = text_zu_sprache(
-        answer
-    )
-
-    if not audio_data:
-
-        print(
-            "Keine Fish-Audio-Antwort."
-        )
-
-        return
-
-    audio_file = io.BytesIO(
-        audio_data
-    )
-
-    audio_file.name = "jarvis.mp3"
-
-    await update.message.reply_audio(
-        audio=audio_file,
-        title="JARVIS",
-        performer="JARVIS",
-    )
-
-    print(
-        "JARVIS: Stimme gesendet."
-    )
-
-
-# ============================================================
-# NACHRICHT VERARBEITEN
-# ============================================================
-
-async def verarbeite_text(
-    update,
-    user_text
-):
-
-    recherchieren = (
-        soll_recherchieren(
-            user_text
-        )
-    )
-
-    print(
-        "===================================="
-    )
-
-    print(
-        f"Liam: {user_text}"
-    )
-
-    print(
-        f"Recherche notwendig: "
-        f"{recherchieren}"
-    )
-
-    answer = frage_gemini(
-        user_text,
-        recherchieren=recherchieren,
-    )
-
-    await sende_jarvis_antwort(
-        update,
-        answer
-    )
-
-
-# ============================================================
-# TELEGRAM
-# ============================================================
-
-async def handle_update(
-    update,
-    context
-):
-
-    if not update.message:
-
-        return
-
-    message = update.message
-
-    # --------------------------------------------------------
-    # TEXT
-    # --------------------------------------------------------
-
-    if message.text:
-
-        user_text = (
-            message.text.strip()
-        )
-
-        if not user_text:
-
+        if lowered == "/memory":
+            await send_answer(update, memory_status(state), False)
+            return
+        if lowered == "/reset":
+            state.summary = ""
+            state.messages = []
+            await asyncio.to_thread(memory_store.save, user_id, state)
+            await send_answer(update, "Aktueller Gesprächsverlauf gelöscht. Dauerhafte Fakten bleiben erhalten.", False)
+            return
+        if lowered == "/forgetall":
+            state = ChatMemory(voice_enabled=state.voice_enabled)
+            await asyncio.to_thread(memory_store.save, user_id, state)
+            await send_answer(update, "Gesprächsverlauf und dauerhafte Fakten wurden gelöscht.", False)
+            return
+        if lowered in ("/voice on", "sprache an"):
+            state.voice_enabled = True
+            await asyncio.to_thread(memory_store.save, user_id, state)
+            await send_answer(update, "Sprachausgabe ist eingeschaltet.", False)
+            return
+        if lowered in ("/voice off", "sprache aus"):
+            state.voice_enabled = False
+            await asyncio.to_thread(memory_store.save, user_id, state)
+            await send_answer(update, "Sprachausgabe ist ausgeschaltet.", False)
             return
 
-        await verarbeite_text(
-            update,
-            user_text
-        )
+        fact = remember_command(user_text)
+        if fact:
+            if fact.casefold() not in {existing.casefold() for existing in state.facts}:
+                state.facts.append(fact)
+                state.facts = state.facts[-MAX_FACTS:]
+            await asyncio.to_thread(memory_store.save, user_id, state)
+            await send_answer(update, f"Merke ich mir, Sir: {fact}", state.voice_enabled)
+            return
 
+        forgotten = forget_command(user_text)
+        if forgotten:
+            state.facts, removed = remove_matching_facts(state.facts, forgotten)
+            await asyncio.to_thread(memory_store.save, user_id, state)
+            answer = (
+                "Vergessen: " + "; ".join(removed)
+                if removed
+                else "Dazu habe ich keinen passenden dauerhaften Fakt gefunden."
+            )
+            await send_answer(update, answer, state.voice_enabled)
+            return
+
+        research = wants_web_search(user_text)
+        deep = wants_deeper_thinking(user_text)
+        answer = await asyncio.to_thread(ask_gemini, user_text, state, research, deep)
+        if not answer:
+            await send_answer(update, "Gemini konnte gerade keine verwertbare Antwort erzeugen.", False)
+            return
+
+        state.messages.extend(
+            [
+                {"role": "user", "text": clean_text(user_text)},
+                {"role": "assistant", "text": clean_text(answer)},
+            ]
+        )
+        state.total_messages += 2
+        await asyncio.to_thread(summarize_old_messages, state)
+        await asyncio.to_thread(memory_store.save, user_id, state)
+        await send_answer(update, answer, state.voice_enabled)
+
+
+async def handle_update(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not update.message:
+        return
+    if update.message.text and update.message.text.strip():
+        await process_text(update, update.message.text.strip())
+        return
+    if update.message.voice or update.message.audio:
+        await update.message.reply_text("Spracheingabe ist noch nicht aktiviert. Text funktioniert bereits.")
+
+
+class HealthHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        if self.path not in ("/", "/health"):
+            self.send_response(404)
+            self.end_headers()
+            return
+        body = json.dumps(
+            {
+                "status": "ok",
+                "service": "jarvis",
+                "memory": "neon" if memory_store.persistent else "ram",
+            }
+        ).encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def log_message(self, format, *args):
         return
 
-    # --------------------------------------------------------
-    # SPRACHE / AUDIO
-    # --------------------------------------------------------
 
-    if message.voice or message.audio:
-
-        await message.reply_text(
-            "Sprachverarbeitung ist momentan deaktiviert."
-        )
-
-        return
+def start_web_server() -> None:
+    port = int(os.getenv("PORT", "10000"))
+    HTTPServer(("0.0.0.0", port), HealthHandler).serve_forever()
 
 
-# ============================================================
-# START
-# ============================================================
-
-def main():
-
-    required_variables = {
-        "TELEGRAM_TOKEN":
-            TELEGRAM_TOKEN,
-
-        "GEMINI_API_KEY":
-            GEMINI_API_KEY,
-
-        "FISH_API_KEY":
-            FISH_API_KEY,
-
-        "FISH_VOICE_ID":
-            FISH_VOICE_ID,
+def main() -> None:
+    required = {
+        "TELEGRAM_TOKEN": TELEGRAM_TOKEN,
+        "GEMINI_API_KEY": GEMINI_API_KEY,
+        "FISH_API_KEY": FISH_API_KEY,
+        "FISH_VOICE_ID": FISH_VOICE_ID,
     }
-
-    missing = [
-        name
-        for name, value
-        in required_variables.items()
-        if not value
-    ]
-
+    missing = [name for name, value in required.items() if not value]
     if missing:
+        raise RuntimeError("Fehlende Environment Variables: " + ", ".join(missing))
 
-        raise RuntimeError(
-            "Folgende Environment Variables fehlen: "
-            + ", ".join(missing)
-        )
+    memory_store.initialize()
+    threading.Thread(target=start_web_server, daemon=True).start()
 
-    # --------------------------------------------------------
-    # RENDER HEALTH SERVER
-    # --------------------------------------------------------
+    application = Application.builder().token(TELEGRAM_TOKEN).build()
+    application.add_handler(MessageHandler(filters.ALL, handle_update))
 
-    web_thread = threading.Thread(
-        target=start_web_server,
-        daemon=True
-    )
-
-    web_thread.start()
-
-    # --------------------------------------------------------
-    # TELEGRAM BOT
-    # --------------------------------------------------------
-
-    application = (
-        Application.builder()
-        .token(TELEGRAM_TOKEN)
-        .build()
-    )
-
-    application.add_handler(
-        MessageHandler(
-            filters.ALL,
-            handle_update
-        )
-    )
-
-    # --------------------------------------------------------
-    # STATUS
-    # --------------------------------------------------------
-
-    print(
-        "===================================="
-    )
-
-    print(
-        "JARVIS ist online."
-    )
-
-    print(
-        "Gemini 3.5 Flash-Lite: AKTIV"
-    )
-
-    print(
-        "Google Search Grounding: BEREIT"
-    )
-
-    print(
-        "Fish Audio: AKTIV"
-    )
-
-    print(
-        "Groq: NICHT VERWENDET"
-    )
-
-    print(
-        "OpenRouter: NICHT VERWENDET"
-    )
-
-    print(
-        "DDGS: NICHT VERWENDET"
-    )
-
-    print(
-        "Render Web Server: AKTIV"
-    )
-
-    print(
-        "Warte auf Telegram-Nachrichten..."
-    )
-
-    print(
-        "===================================="
-    )
-
+    print("JARVIS ist online.")
+    print(f"Gemini: {GEMINI_MODEL}; Standard-Denkstufe: low")
+    print(f"Memory: {'Neon dauerhaft' if memory_store.persistent else 'RAM-Reserve'}")
+    print("Google Search: bedarfsgesteuert")
+    print("Fish Audio: aktiv; mit /voice off abschaltbar")
+    print("Spracheingabe: noch deaktiviert")
     application.run_polling()
 
 
-# ============================================================
-# PROGRAMMSTART
-# ============================================================
-
 if __name__ == "__main__":
-
     main()
