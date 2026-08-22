@@ -1,4 +1,5 @@
 import asyncio
+import html
 import io
 import json
 import os
@@ -13,7 +14,7 @@ import requests
 from google import genai
 from google.genai import types
 from psycopg.types.json import Jsonb
-from telegram import Update
+from telegram import LinkPreviewOptions, Update
 from telegram.ext import Application, ContextTypes, MessageHandler, filters
 
 
@@ -50,6 +51,9 @@ RECENT_MESSAGES_TO_KEEP = 50
 SUMMARY_TRIGGER = 80
 MAX_MESSAGE_CHARS = 8_000
 MAX_FACTS = 100
+MAX_SOURCES = 3
+MAX_SPEECH_CHARS = 700
+MAX_SPEECH_SENTENCES = 4
 
 
 SYSTEM_PROMPT = """
@@ -113,6 +117,12 @@ class ChatMemory:
     messages: list[dict] = field(default_factory=list)
     total_messages: int = 0
     voice_enabled: bool = True
+
+
+@dataclass
+class AssistantReply:
+    text: str
+    sources: list[tuple[str, str]] = field(default_factory=list)
 
 
 class MemoryStore:
@@ -358,6 +368,53 @@ def interaction_input(messages: list[dict], user_text: str) -> str:
     )
 
 
+def without_source_section(text: str) -> str:
+    """Entfernt Quellenblöcke, die das Modell selbst in den Antworttext schreibt."""
+    match = re.search(r"\s*(?:#{1,6}\s*)?(?:quellen|sources)\s*:", text, re.I)
+    return text[: match.start()].rstrip() if match else text.strip()
+
+
+def text_for_speech(text: str) -> str:
+    """Erzeugt ohne weiteren KI-Aufruf eine kurze, natürlich lesbare Fassung."""
+    spoken = without_source_section(text)
+    spoken = re.sub(r"\[([^\]]+)\]\(https?://[^)]+\)", r"\1", spoken)
+    spoken = re.sub(r"https?://\S+", "", spoken)
+    spoken = re.sub(r"(?m)^\s*[-*•#]+\s*", "", spoken)
+    spoken = re.sub(r"[`*_#>]", "", spoken)
+    spoken = " ".join(spoken.split()).strip()
+    if not spoken:
+        return ""
+
+    sentences = re.split(r"(?<=[.!?])\s+", spoken)
+    selected: list[str] = []
+    for sentence in sentences:
+        sentence = sentence.strip()
+        if not sentence:
+            continue
+        candidate = " ".join(selected + [sentence])
+        if selected and (
+            len(selected) >= MAX_SPEECH_SENTENCES or len(candidate) > MAX_SPEECH_CHARS
+        ):
+            break
+        selected.append(sentence)
+
+    result = " ".join(selected) or spoken
+    if len(result) > MAX_SPEECH_CHARS:
+        result = result[:MAX_SPEECH_CHARS].rsplit(" ", 1)[0].rstrip(" ,;:-")
+        if result and result[-1] not in ".!?":
+            result += "."
+    return result
+
+
+def source_message(sources: list[tuple[str, str]]) -> str:
+    lines = ["Quellen:"]
+    for index, (title, url) in enumerate(sources[:MAX_SOURCES], start=1):
+        safe_title = html.escape(" ".join(title.split())[:100] or "Quelle")
+        safe_url = html.escape(url, quote=True)
+        lines.append(f'{index}. <a href="{safe_url}">{safe_title}</a>')
+    return "\n".join(lines)
+
+
 def print_usage(response, label: str) -> None:
     usage = getattr(response, "usage_metadata", None)
     if not usage:
@@ -386,6 +443,7 @@ def print_interaction_usage(interaction, label: str) -> None:
 
 def interaction_sources(interaction) -> list[tuple[str, str]]:
     sources: list[tuple[str, str]] = []
+    seen_titles: set[str] = set()
     try:
         for step in getattr(interaction, "steps", None) or []:
             if getattr(step, "type", None) != "model_output":
@@ -395,21 +453,38 @@ def interaction_sources(interaction) -> list[tuple[str, str]]:
                     if getattr(annotation, "type", None) != "url_citation":
                         continue
                     uri = getattr(annotation, "url", None)
-                    title = getattr(annotation, "title", None) or "Quelle"
-                    if uri and all(uri != existing_uri for _, existing_uri in sources):
+                    title = " ".join((getattr(annotation, "title", None) or "Quelle").split())
+                    title_key = title.casefold()
+                    if (
+                        uri
+                        and uri.startswith(("https://", "http://"))
+                        and title_key not in seen_titles
+                    ):
                         sources.append((title, uri))
+                        seen_titles.add(title_key)
     except Exception as error:
         print(f"Quellen konnten nicht vollständig gelesen werden: {type(error).__name__}")
-    return sources[:5]
+    return sources[:MAX_SOURCES]
 
 
-def ask_gemini(user_text: str, state: ChatMemory, research: bool, deep: bool) -> str | None:
+def ask_gemini(
+    user_text: str, state: ChatMemory, research: bool, deep: bool
+) -> AssistantReply | None:
     if not gemini_client:
         print("Gemini: GEMINI_API_KEY fehlt.")
         return None
 
     thinking_level = "medium" if deep else "low"
     system_instruction = SYSTEM_PROMPT + "\n\n" + LIAM_BASE_PROFILE + memory_context(state)
+    if research:
+        system_instruction += (
+            "\n\nWEBRECHERCHE\n"
+            "Beantworte die Frage zuerst direkt und verständlich. Bleibe normalerweise bei "
+            "zwei bis vier Sätzen, außer Liam verlangt ausdrücklich eine ausführliche Analyse. "
+            "Bevorzuge offizielle oder andere primäre Quellen. Füge selbst keine Quellenliste, "
+            "keine URLs und keinen Abschnitt mit der Überschrift 'Quellen' hinzu; das System "
+            "ergänzt die gefundenen Quellen separat."
+        )
     config_kwargs = {
         "system_instruction": system_instruction,
         "thinking_config": types.ThinkingConfig(thinking_level=thinking_level),
@@ -434,16 +509,13 @@ def ask_gemini(user_text: str, state: ChatMemory, research: bool, deep: bool) ->
                 store=False,
             )
             print_interaction_usage(interaction, "Web-Antwort")
-            answer = (getattr(interaction, "output_text", None) or "").strip()
+            answer = without_source_section(
+                (getattr(interaction, "output_text", None) or "").strip()
+            )
             if not answer:
                 print("Gemini-Websuche: Leere Textantwort erhalten.")
                 return None
-            sources = interaction_sources(interaction)
-            if sources:
-                answer += "\n\nQuellen:\n" + "\n".join(
-                    f"- {title}: {uri}" for title, uri in sources
-                )
-            return answer
+            return AssistantReply(answer, interaction_sources(interaction))
 
         response = gemini_client.models.generate_content(
             model=GEMINI_MODEL,
@@ -454,7 +526,7 @@ def ask_gemini(user_text: str, state: ChatMemory, research: bool, deep: bool) ->
         answer = (response.text or "").strip()
         if not answer:
             return None
-        return answer
+        return AssistantReply(answer)
     except Exception as error:
         print(f"Gemini-Fehler: {type(error).__name__}: {error}")
         return None
@@ -537,15 +609,28 @@ def telegram_chunks(text: str, limit: int = 3_900) -> list[str]:
     return chunks
 
 
-async def send_answer(update: Update, answer: str, voice_enabled: bool) -> None:
+async def send_answer(
+    update: Update,
+    answer: str,
+    voice_enabled: bool,
+    sources: list[tuple[str, str]] | None = None,
+) -> None:
     if not update.message:
         return
     for chunk in telegram_chunks(answer):
         await update.message.reply_text(chunk)
 
+    if sources:
+        await update.message.reply_text(
+            source_message(sources),
+            parse_mode="HTML",
+            link_preview_options=LinkPreviewOptions(is_disabled=True),
+        )
+
     if not voice_enabled:
         return
-    audio_data = await asyncio.to_thread(text_to_speech, answer)
+    spoken_answer = text_for_speech(answer)
+    audio_data = await asyncio.to_thread(text_to_speech, spoken_answer)
     if audio_data:
         audio_file = io.BytesIO(audio_data)
         audio_file.name = "jarvis.mp3"
@@ -627,21 +712,21 @@ async def process_text(update: Update, user_text: str) -> None:
 
         research = wants_web_search(user_text)
         deep = wants_deeper_thinking(user_text)
-        answer = await asyncio.to_thread(ask_gemini, user_text, state, research, deep)
-        if not answer:
+        reply = await asyncio.to_thread(ask_gemini, user_text, state, research, deep)
+        if not reply:
             await send_answer(update, "Gemini konnte gerade keine verwertbare Antwort erzeugen.", False)
             return
 
         state.messages.extend(
             [
                 {"role": "user", "text": clean_text(user_text)},
-                {"role": "assistant", "text": clean_text(answer)},
+                {"role": "assistant", "text": clean_text(reply.text)},
             ]
         )
         state.total_messages += 2
         await asyncio.to_thread(summarize_old_messages, state)
         await asyncio.to_thread(memory_store.save, user_id, state)
-        await send_answer(update, answer, state.voice_enabled)
+        await send_answer(update, reply.text, state.voice_enabled, reply.sources)
 
 
 async def handle_update(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
