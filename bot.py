@@ -32,12 +32,15 @@ FISH_VOICE_ID = os.getenv("FISH_VOICE_ID")
 # MODELLE
 # ============================================================
 
+# DAS NEUE JARVIS-GEHIRN
 GEMINI_MODEL = "gemini-3.5-flash-lite"
+
+# JARVIS-STIMME
 FISH_MODEL = "s2.1-pro-free"
 
 
 # ============================================================
-# API
+# API-ENDPUNKT FISH AUDIO
 # ============================================================
 
 FISH_URL = "https://api.fish.audio/v1/tts"
@@ -61,7 +64,7 @@ Du bist JARVIS, Liams digitaler Partner.
 
 Du bist kein gewöhnlicher Chatbot.
 
-PERSÖNLICHKEIT:
+PERSÖNLICHKEIT
 
 - ehrlich
 - kompetent
@@ -95,13 +98,13 @@ Antworte immer in natürlichem Deutsch.
 Antworte kurz, wenn eine kurze Antwort reicht.
 Antworte ausführlich, wenn das Thema es verlangt.
 
-HUMOR:
+HUMOR
 
 Trockener Humor, Ironie und gelegentlicher Sarkasmus sind erwünscht.
 
 Humor soll natürlich wirken und nicht jede Antwort dominieren.
 
-EHRLICHKEIT:
+EHRLICHKEIT
 
 - Erfinde keine Fakten.
 - Erfinde keine Quellen.
@@ -110,7 +113,7 @@ EHRLICHKEIT:
 - Sage offen, wenn Informationen fehlen.
 - Behaupte keine Handlung, die du nicht tatsächlich ausgeführt hast.
 
-RECHERCHE:
+RECHERCHE
 
 Wenn Liam ausdrücklich recherchieren, online suchen, im Internet
 nachsehen oder aktuelle Informationen haben möchte, soll eine
@@ -146,7 +149,7 @@ Erfinde niemals:
 - Produkte
 - Suchergebnisse
 
-PREISRECHERCHE:
+PREISRECHERCHE
 
 Wenn Liam Preise verlangt:
 
@@ -165,12 +168,12 @@ sage das offen.
 
 Wenn Suchergebnisse widersprüchlich sind, weise darauf hin.
 
-QUELLEN:
+QUELLEN
 
 Wenn Webrecherche verwendet wurde, soll JARVIS nach Möglichkeit
 die verwendeten Quellen bzw. Links nennen.
 
-AUTONOMIE:
+AUTONOMIE
 
 Du darfst Vorschläge machen.
 
@@ -178,7 +181,7 @@ Du darfst niemals behaupten, eine Datei, ein Programm, einen
 Computer, ein Konto oder ein System verändert oder benutzt zu haben,
 wenn kein tatsächlicher Zugriff vorhanden war.
 
-CODE:
+CODE
 
 Wenn du Code erzeugst:
 
@@ -188,7 +191,7 @@ Wenn du Code erzeugst:
 - erfinde keine Funktionen
 - verändere deinen eigenen Code nicht eigenmächtig
 
-DEINE IDENTITÄT:
+DEINE IDENTITÄT
 
 Du bist JARVIS.
 
@@ -272,7 +275,7 @@ def start_web_server():
 
 
 # ============================================================
-# ERKENNEN, OB INTERNETRECHERCHE NÖTIG IST
+# ENTSCHEIDEN, OB WEBRECHERCHE NÖTIG IST
 # ============================================================
 
 def soll_recherchieren(text):
@@ -393,6 +396,7 @@ def internet_suche(query):
                 ""
             ).strip()
 
+            # Snippet begrenzen
             body = body[:900]
 
             if not title and not body:
@@ -445,10 +449,10 @@ def internet_suche(query):
 
 
 # ============================================================
-# RECHERCHEMATERIAL
+# RECHERCHEMATERIAL FÜR GEMINI
 # ============================================================
 
-def recherchemaaterial_erstellen(
+def recherchematerial_erstellen(
     results
 ):
 
@@ -481,11 +485,12 @@ Suchauszug:
         parts
     )
 
+    # Begrenzen, damit die Anfrage nicht unnötig groß wird.
     return material[:9000]
 
 
 # ============================================================
-# GEMINI
+# GEMINI - JARVIS
 # ============================================================
 
 def frage_gemini(
@@ -514,6 +519,10 @@ def frage_gemini(
         user_text
     ]
 
+    # --------------------------------------------------------
+    # RECHERCHEERGEBNISSE
+    # --------------------------------------------------------
+
     if web_context:
 
         prompt_parts.append(
@@ -533,7 +542,7 @@ WICHTIGE REGELN:
 - Erfinde keine Händler.
 - Erfinde keine URLs.
 - Verwende nur Informationen, die durch die Recherche gestützt werden.
-- Wenn die Quellen widersprüchlich sind, erwähne das.
+- Wenn Quellen widersprüchlich sind, erwähne das.
 - Wenn die Informationen nicht ausreichen, sage das offen.
 
 Bei Preisvergleichen:
@@ -560,10 +569,12 @@ RECHERCHEERGEBNISSE:
             .models
             .generate_content(
                 model=GEMINI_MODEL,
+
                 contents=full_prompt,
+
                 config=types.GenerateContentConfig(
                     system_instruction=SYSTEM_PROMPT,
-                    temperature=0.7,
+
                     max_output_tokens=2048,
                 ),
             )
@@ -593,18 +604,26 @@ RECHERCHEERGEBNISSE:
     except Exception as error:
 
         print(
-            "GEMINI FEHLER:"
+            "===================================="
+        )
+
+        print(
+            "GEMINI FEHLER"
         )
 
         print(
             f"{type(error).__name__}: {error}"
         )
 
+        print(
+            "===================================="
+        )
+
         return None
 
 
 # ============================================================
-# FISH AUDIO
+# FISH AUDIO - TEXT ZU SPRACHE
 # ============================================================
 
 def text_zu_sprache(
@@ -636,6 +655,14 @@ def text_zu_sprache(
 
     print(
         "FISH AUDIO TTS"
+    )
+
+    print(
+        f"Modell: {FISH_MODEL}"
+    )
+
+    print(
+        "Voice ID: vorhanden"
     )
 
     headers = {
@@ -716,7 +743,7 @@ def text_zu_sprache(
 
 
 # ============================================================
-# TELEGRAM-ANTWORT
+# TELEGRAM ANTWORT
 # ============================================================
 
 async def sende_jarvis_antwort(
@@ -749,7 +776,7 @@ async def sende_jarvis_antwort(
     )
 
     # --------------------------------------------------------
-    # FISH AUDIO
+    # STIMME
     # --------------------------------------------------------
 
     audio_data = text_zu_sprache(
@@ -816,7 +843,7 @@ async def verarbeite_text(
         )
 
         web_context = (
-            recherchemaaterial_erstellen(
+            recherchematerial_erstellen(
                 results
             )
         )
@@ -867,15 +894,13 @@ async def handle_update(
         return
 
     # --------------------------------------------------------
-    # VOICE / AUDIO
+    # SPRACHE / AUDIO
     # --------------------------------------------------------
 
     if message.voice or message.audio:
 
         await message.reply_text(
-            "Sprachverarbeitung ist momentan deaktiviert. "
-            "Wir bauen sie später wieder sauber mit einer "
-            "separaten Speech-to-Text-Lösung ein."
+            "Sprachverarbeitung ist momentan deaktiviert."
         )
 
         return
