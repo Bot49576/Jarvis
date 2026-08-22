@@ -88,6 +88,11 @@ class JarvisLogicTests(unittest.TestCase):
         self.assertIn("Pizza", summary)
         self.assertIn("Fußball", summary)
 
+    def test_memory_prompt_does_not_replace_forgotten_fact_with_another(self):
+        prompt = bot.memory_context(ChatMemory(facts=["Das Testcodewort ist Nordstern"])).casefold()
+        self.assertIn("nenne weder den gelöschten wert", prompt)
+        self.assertIn("ersatzweise einen anderen gespeicherten fakt", prompt)
+
     def test_telegram_messages_are_chunked(self):
         chunks = telegram_chunks("A" * 9_000)
         self.assertGreater(len(chunks), 2)

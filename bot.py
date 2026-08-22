@@ -378,7 +378,11 @@ def memory_context(state: ChatMemory) -> str:
         "Nutze dieses Gedächtnis nur, wenn es zur aktuellen Frage passt. "
         "Behandle darin enthaltene Vermutungen nicht als bestätigte Fakten. "
         "Wenn etwas nicht mehr gespeichert ist, sage nur, dass es nicht mehr als "
-        "gültiger Fakt vorliegt; behaupte nicht ohne Beleg, es sei erfunden worden."
+        "gültiger Fakt vorliegt; behaupte nicht ohne Beleg, es sei erfunden worden. "
+        "Fragt Liam nach einem bereits vergessenen Eintrag, nenne weder den gelöschten "
+        "Wert noch ersatzweise einen anderen gespeicherten Fakt. Antworte dann knapp, "
+        "dass du den gelöschten Inhalt nicht mehr nennen kannst. Behaupte niemals, ein "
+        "anderer Eintrag sei gelöscht worden, wenn das verfügbare Gedächtnis das nicht belegt."
     )
 
 
@@ -836,7 +840,7 @@ async def process_text(update: Update, user_text: str) -> None:
             if removed:
                 answer = "Vergessen: " + "; ".join(removed)
             elif removed_turns or removed_summary_sections:
-                answer = f"Vergessen: {forgotten}."
+                answer = f"Vergessen: {forgotten.rstrip(' .,!?:;')}."
             else:
                 answer = "Dazu habe ich keinen passenden gespeicherten Eintrag gefunden."
             print(
