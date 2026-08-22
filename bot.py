@@ -285,6 +285,7 @@ def wants_web_search(text: str) -> bool:
         "preise",
         "angebot",
         "verfügbarkeit",
+        "vorabversion",
         "release",
         "update",
         "news",

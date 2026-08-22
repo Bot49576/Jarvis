@@ -37,6 +37,7 @@ class JarvisLogicTests(unittest.TestCase):
     def test_research_detection(self):
         self.assertTrue(wants_web_search("Recherchiere aktuelle Grafikkartenpreise"))
         self.assertTrue(wants_web_search("Was gibt es heute Neues?"))
+        self.assertTrue(wants_web_search("Welche neuere Vorabversion gibt es?"))
         self.assertFalse(wants_web_search("Erkläre mir Photosynthese"))
 
     def test_deeper_thinking_is_explicit(self):
