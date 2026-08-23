@@ -14,6 +14,7 @@ from bot import (
     interaction_input,
     interaction_sources,
     message_contents,
+    normalize_audio_mime_type,
     pronounce_version_numbers,
     response_diagnostics,
     remember_command,
@@ -115,6 +116,28 @@ class JarvisLogicTests(unittest.TestCase):
         chunks = telegram_chunks("A" * 9_000)
         self.assertGreater(len(chunks), 2)
         self.assertTrue(all(len(chunk) <= 3_900 for chunk in chunks))
+
+    def test_telegram_voice_mime_type_is_normalized_for_gemini(self):
+        self.assertEqual(normalize_audio_mime_type("audio/ogg"), "audio/ogg")
+        self.assertEqual(normalize_audio_mime_type("audio/mpeg"), "audio/mp3")
+        self.assertEqual(normalize_audio_mime_type(None), "audio/ogg")
+
+    def test_audio_transcription_uses_gemini_and_returns_plain_text(self):
+        class FakeModels:
+            def __init__(self):
+                self.calls = []
+
+            def generate_content(self, **kwargs):
+                self.calls.append(kwargs)
+                return SimpleNamespace(text='“Rufe bitte Markus an.”', usage_metadata=None)
+
+        fake_client = SimpleNamespace(models=FakeModels())
+        with patch.object(bot, "gemini_client", fake_client):
+            transcript = bot.transcribe_audio(b"test-audio", "audio/ogg")
+
+        self.assertEqual(transcript, "Rufe bitte Markus an.")
+        self.assertEqual(len(fake_client.models.calls), 1)
+        self.assertEqual(fake_client.models.calls[0]["model"], bot.GEMINI_MODEL)
 
     def test_gemini_history_has_valid_roles(self):
         contents = message_contents(

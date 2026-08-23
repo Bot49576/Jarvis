@@ -58,6 +58,8 @@ MAX_FACTS = 100
 MAX_SOURCES = 3
 MAX_SPEECH_CHARS = 700
 MAX_SPEECH_SENTENCES = 4
+MAX_VOICE_DURATION_SECONDS = 120
+MAX_AUDIO_BYTES = 20 * 1024 * 1024
 GEMINI_RETRY_DELAY_SECONDS = 0.75
 TELEGRAM_WEBHOOK_PATH = "telegram/webhook"
 
@@ -724,6 +726,57 @@ def summarize_old_messages(state: ChatMemory) -> None:
         state.messages = state.messages[-SUMMARY_TRIGGER:]
 
 
+def normalize_audio_mime_type(mime_type: str | None) -> str:
+    normalized = (mime_type or "").casefold().split(";", 1)[0].strip()
+    aliases = {
+        "audio/mpeg": "audio/mp3",
+        "audio/x-mpeg": "audio/mp3",
+        "audio/x-wav": "audio/wav",
+        "audio/wave": "audio/wav",
+        "audio/x-aiff": "audio/aiff",
+        "audio/x-flac": "audio/flac",
+    }
+    return aliases.get(normalized, normalized or "audio/ogg")
+
+
+def transcribe_audio(audio_data: bytes, mime_type: str | None) -> str | None:
+    if not gemini_client or not audio_data or len(audio_data) > MAX_AUDIO_BYTES:
+        return None
+
+    prompt = (
+        "Transkribiere diese Sprachnachricht auf Deutsch. Gib ausschließlich den "
+        "gesprochenen Wortlaut als normalen Text aus: keine Einleitung, keine "
+        "Zusammenfassung, keine Anführungszeichen und keine Zeitstempel."
+    )
+    audio_part = types.Part.from_bytes(
+        data=audio_data,
+        mime_type=normalize_audio_mime_type(mime_type),
+    )
+    for attempt in range(1, 3):
+        try:
+            response = gemini_client.models.generate_content(
+                model=GEMINI_MODEL,
+                contents=[prompt, audio_part],
+                config=types.GenerateContentConfig(
+                    thinking_config=types.ThinkingConfig(thinking_level="minimal"),
+                    max_output_tokens=1_000,
+                ),
+            )
+            print_usage(response, f"Spracheingabe Versuch {attempt}")
+            transcript = (response.text or "").strip().strip('"“”')
+            if transcript:
+                return clean_text(transcript)[:MAX_MESSAGE_CHARS]
+            print(f"Spracheingabe Versuch {attempt}: leere Transkription")
+        except Exception as error:
+            print(
+                f"Spracheingabe-Fehler Versuch {attempt}: "
+                f"{type(error).__name__}: {error}"
+            )
+        if attempt == 1:
+            time.sleep(GEMINI_RETRY_DELAY_SECONDS)
+    return None
+
+
 def text_to_speech(text: str) -> bytes | None:
     if not text or not FISH_API_KEY or not FISH_VOICE_ID:
         return None
@@ -902,7 +955,52 @@ async def handle_update(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         await process_text(update, update.message.text.strip())
         return
     if update.message.voice or update.message.audio:
-        await update.message.reply_text("Spracheingabe ist noch nicht aktiviert. Text funktioniert bereits.")
+        if not update.effective_user:
+            return
+        if (
+            ALLOWED_TELEGRAM_USER_ID
+            and str(update.effective_user.id) != ALLOWED_TELEGRAM_USER_ID
+        ):
+            await update.message.reply_text("Dieser JARVIS ist privat.")
+            return
+
+        media = update.message.voice or update.message.audio
+        duration = int(getattr(media, "duration", 0) or 0)
+        file_size = int(getattr(media, "file_size", 0) or 0)
+        if duration > MAX_VOICE_DURATION_SECONDS:
+            await update.message.reply_text(
+                "Die Sprachnachricht ist zu lang. Bitte höchstens zwei Minuten pro Nachricht."
+            )
+            return
+        if file_size > MAX_AUDIO_BYTES:
+            await update.message.reply_text(
+                "Die Audiodatei ist zu groß. Bitte sende eine kürzere Sprachnachricht."
+            )
+            return
+
+        try:
+            telegram_file = await media.get_file()
+            audio_data = bytes(await telegram_file.download_as_bytearray())
+        except Exception as error:
+            print(f"Telegram-Audio-Download fehlgeschlagen: {type(error).__name__}")
+            await update.message.reply_text(
+                "Ich konnte die Sprachnachricht nicht laden. Bitte versuche es noch einmal."
+            )
+            return
+
+        mime_type = getattr(media, "mime_type", None) or "audio/ogg"
+        print(
+            f"Spracheingabe: duration={duration}s, bytes={len(audio_data)}, "
+            f"mime={normalize_audio_mime_type(mime_type)}"
+        )
+        transcript = await asyncio.to_thread(transcribe_audio, audio_data, mime_type)
+        if not transcript:
+            await update.message.reply_text(
+                "Ich konnte die Sprachnachricht nicht sicher verstehen. "
+                "Bitte sprich sie noch einmal kurz und deutlich ein."
+            )
+            return
+        await process_text(update, transcript)
 
 
 def main() -> None:
@@ -933,7 +1031,7 @@ def main() -> None:
     print(f"Memory: {'Neon dauerhaft' if memory_store.persistent else 'RAM-Reserve'}")
     print("Google Search: bedarfsgesteuert")
     print("Fish Audio: aktiv; mit /voice off abschaltbar")
-    print("Spracheingabe: noch deaktiviert")
+    print("Spracheingabe: Telegram-Audio über Gemini aktiv")
     print("Telegram: sicherer Webhook aktiv")
     application.run_webhook(
         listen="0.0.0.0",

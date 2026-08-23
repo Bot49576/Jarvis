@@ -26,6 +26,10 @@
   höchstens drei anklickbare Quellen; Fish Audio liest nur eine kurze,
   bereinigte Fassung ohne URLs, Quellenblock oder Markdown vor. Dafür ist kein
   zweiter Gemini-Aufruf nötig.
+- Telegram-Sprachnachrichten bis zwei Minuten werden von Gemini in Text
+  umgewandelt und anschließend durch denselben sicheren Gesprächs-, Memory- und
+  Rechercheablauf verarbeitet wie eine getippte Nachricht. Fish Audio bleibt
+  ausschließlich für die gesprochene JARVIS-Antwort zuständig.
 - Liams Angaben aus `Liam_allgemein_jarvis.txt` werden als geschützte Render-
   Variable `LIAM_BASE_PROFILE` hinterlegt, nicht im öffentlichen Repository.
   Neuere Aussagen und gespeicherte Fakten haben Vorrang; leere Felder werden
@@ -40,9 +44,23 @@ Render-Neustart.
 Optional kann `ALLOWED_TELEGRAM_USER_ID` auf Liams numerische Telegram-ID gesetzt
 werden. Dann beantwortet der Bot keine fremden Nutzer.
 
+## Hosting-Entscheidung und Ausweichplan (22.08.2026)
+
+- Der bestehende Render-Free-Dienst mit Telegram-Webhook bleibt unverändert.
+- Bekannte Grenze: Die kostenlose Render-Instanz kann nach einer Ruhephase
+  einschlafen. Die erste Anfrage danach braucht deshalb deutlich länger und
+  kann bei ungünstigem Ablauf wie eine ausgebliebene Antwort wirken.
+- Falls dieser Fehler wiederholt auftritt oder die Wartezeit nicht mehr
+  akzeptabel ist, ist eine dauerhaft laufende Google-Compute-Engine-Instanz
+  vom Typ `e2-micro` der vorgemerkte Ausweichplan.
+- Geschätzter Umstiegsaufwand: etwa 1,5 bis 3 Stunden plus etwas mehr laufende
+  Wartung. Ein Wechsel erfolgt nicht automatisch, sondern erst nach erneuter
+  Prüfung und Daniels Freigabe.
+- Diese Entscheidung gehört ausschließlich zum Liam-Mini-Jarvis und ändert
+  nichts am separaten DARVIS-Projekt.
+
 ## Noch bewusst nicht enthalten
 
-- Spracheingabe/STT
 - automatische Speicherung jedes persönlichen Details als dauerhafter Fakt
 - OpenRouter, DDGS oder Groq
 - autonome Hintergrundfunktionen
