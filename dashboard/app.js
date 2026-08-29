@@ -1,4 +1,5 @@
 import { DashboardClient, consumePairingTokenFromFragment, isLocalPreview } from './api-client.js';
+import { chooseAcknowledgement } from './acknowledgements.js';
 import { createJarvisVisualizer } from './visualizer.js';
 
 const app = document.querySelector('#app');
@@ -56,6 +57,7 @@ let activeAudio = null;
 let outputAudioContext = null;
 let outputFrame = null;
 let statusTimer = null;
+let previousAcknowledgement = '';
 
 function showPage(nextPage) {
   page = Math.max(0, Math.min(2, nextPage));
@@ -171,7 +173,7 @@ function appendMessage(role, text, { sources = [], files = [] } = {}) {
   article.className = `bubble ${role}`;
   const author = role === 'user' ? 'LIAM' : 'JARVIS';
   const meta = document.createElement('small');
-  meta.textContent = `${author} · ${currentTime()}`;
+  meta.textContent = `${author} · ${role === 'ack' ? 'SOFORT' : currentTime()}`;
   const paragraph = document.createElement('p');
   paragraph.textContent = text;
   article.append(meta, paragraph);
@@ -199,6 +201,15 @@ function appendMessage(role, text, { sources = [], files = [] } = {}) {
   }
   messages.append(article);
   messages.scrollTop = messages.scrollHeight;
+  return article;
+}
+
+function appendAcknowledgement(text) {
+  const article = appendMessage('ack', text);
+  const thinking = document.createElement('span');
+  thinking.className = 'thinking';
+  thinking.append(document.createElement('i'), document.createElement('i'), document.createElement('i'));
+  article.append(thinking);
   return article;
 }
 
@@ -508,6 +519,12 @@ async function sendCurrentMessage() {
   visualizer.setState('working');
   const visibleText = text || 'Bitte analysiere die angehängte Datei.';
   appendMessage('user', visibleText, { files: files.map((file) => file.name) });
+  const acknowledgement = chooseAcknowledgement(text, {
+    hasFiles: files.length > 0,
+    previous: previousAcknowledgement,
+  });
+  const acknowledgementBubble = acknowledgement ? appendAcknowledgement(acknowledgement) : null;
+  if (acknowledgement) previousAcknowledgement = acknowledgement;
   messageInput.value = '';
   setPendingFiles([]);
   homeFileInput.value = '';
@@ -515,11 +532,13 @@ async function sendCurrentMessage() {
   try {
     const sessionId = await ensureSession();
     const reply = await dashboardClient.chat(sessionId, text, files);
+    acknowledgementBubble?.remove();
     const bubble = appendMessage('jarvis', reply.text, { sources: reply.sources || [] });
     setBusy(false, reply.voice_enabled ? 'SPRACHAUSGABE WIRD GELADEN' : 'MEMORY AKTIV');
     if (reply.voice_enabled) await speakReply(reply.text, bubble);
     else visualizer.setState('ready');
   } catch (error) {
+    acknowledgementBubble?.remove();
     setBusy(false);
     showError(error);
   }

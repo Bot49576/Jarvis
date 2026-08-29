@@ -422,6 +422,18 @@ class DashboardHttpTests(AsyncHTTPTestCase):
         self.assertIn('id="health-value">--', html_source)
         self.assertNotIn("Recherche abgeschlossen", html_source)
 
+    def test_chat_uses_transient_local_acknowledgements_without_an_api_call(self):
+        app_source = (Path(__file__).parent / "dashboard" / "app.js").read_text(
+            encoding="utf-8"
+        )
+        ack_source = (
+            Path(__file__).parent / "dashboard" / "acknowledgements.js"
+        ).read_text(encoding="utf-8")
+        self.assertIn("chooseAcknowledgement", app_source)
+        self.assertIn("acknowledgementBubble?.remove()", app_source)
+        self.assertIn("Einen Moment, Sir. Ich prüfe das.", ack_source)
+        self.assertNotIn("fetch(", ack_source)
+
     def test_pairing_fragment_is_consumed_only_in_the_browser(self):
         source = (Path(__file__).parent / "dashboard" / "api-client.js").read_text(
             encoding="utf-8"

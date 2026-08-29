@@ -121,3 +121,12 @@ werden. Dann beantwortet der Bot keine fremden Nutzer.
 - Schlägt ein Dienst oder die Dashboard-Verbindung fehl, wechselt die Anzeige auf Gelb beziehungsweise Rot und nennt die Einschränkung in einfacher Sprache. Die Systemseite aktualisiert sich bei sichtbarer App alle 30 Sekunden; dabei wird nur der eigene Render-Status abgefragt.
 - Die mobile Ansicht wurde mit 390 × 844 Pixeln geprüft: alle vier echten Dienstzustände und Meldungen sind sichtbar, es gibt keinen horizontalen Überlauf und keine Browserwarnungen. Für diese Prüfung wurden weder Gemini- noch Fish-Anfragen verbraucht.
 - Dieser Stand ist weiterhin nur lokal gespeichert und noch nicht zu GitHub oder Render veröffentlicht.
+
+## Sofortige Kurzrückmeldungen – Schritt 06
+
+- Die PWA zeigt bei voraussichtlich längeren Aufgaben sofort eine kurze JARVIS-Rückmeldung, während die bereits abgesendete echte Anfrage weiterläuft. Dafür wird kein zusätzlicher Gemini-, Fish- oder anderer API-Aufruf erzeugt.
+- Die Auswahl erfolgt lokal und unterscheidet Memory-Abfragen, ausdrückliche Datenbankprüfungen, Datenauswertungen, aktuelle Recherchen, technische Prüfungen und Dateien. Allgemeine längere Aufgaben verwenden mehrere wechselnde JARVIS-Formulierungen.
+- Schnelle Nachrichten wie „Hallo“, „Bist du online?“, kurze Wissensfragen und direkte Memory-Befehle erhalten bewusst keine Zwischenmeldung.
+- Die Zwischenmeldung ist nur während der Bearbeitung sichtbar und wird durch die echte Antwort ersetzt. Dadurch bleibt der dauerhaft gespeicherte Chat frei von künstlichen Zwischenmeldungen.
+- Vierzehn gezielte Klassifizierungsfälle sowie der echte PWA-Ablauf mit verzögerter Testantwort wurden lokal geprüft. Im iPhone-Format erschien die Zwischenmeldung sofort, verschwand bei der Antwort wieder und blieb bei einer einfachen Kontrollfrage vollständig aus.
+- Diese Funktion gilt für das neue PWA-Dashboard. Telegram bleibt unverändert. Der Stand ist weiterhin nicht zu GitHub oder Render veröffentlicht.
