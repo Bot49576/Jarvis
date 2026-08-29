@@ -4,77 +4,68 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <meta name="theme-color" content="#02070b">
-  <meta name="description" content="Installierbare JARVIS-Oberfläche für Liam">
+  <meta name="description" content="Private JARVIS-Oberfläche für Liam">
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" href="icons/jarvis-icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="icons/jarvis-icon.svg">
-  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="approved.css">
   <title>JARVIS · Liam</title>
 </head>
 <body>
-  <div class="scanlines" aria-hidden="true"></div>
-  <div class="app-shell" id="app">
+  <main class="app" id="app" data-page="0" data-state="working">
     <header class="topbar">
-      <div class="brand">
-        <span class="brand-mark" aria-hidden="true"></span>
-        <div><strong>JARVIS</strong><small>LIAM INTERFACE · DASHBOARD</small></div>
-      </div>
-      <div class="system-state"><span class="live-dot"></span><b id="top-status">BEREIT</b><time id="clock">--:--:--</time></div>
-      <button class="install-button" id="install-button" type="button" hidden>INSTALLIEREN</button>
+      <div class="brand"><span class="brand-gem" aria-hidden="true"></span><div><strong>JΛRVIS</strong><small>LIAM'S PRIVATE INTERFACE</small></div></div>
+      <div class="live"><i></i><span id="top-status">BEREIT</span></div>
+      <button id="install-button" type="button" hidden>INSTALLIEREN</button>
     </header>
 
-    <aside class="left-rail" id="left-modules" aria-label="Konfigurierbare Anzeigen"></aside>
+    <div class="viewport" id="viewport">
+      <div class="track" id="track">
+        <section class="screen home" aria-label="JARVIS Hauptseite">
+          <button class="core mode-working" id="voice-core" type="button" aria-label="JARVIS Sprachsteuerung">
+            <span class="orbit orbit-a"></span><span class="orbit orbit-b"></span><span class="orbit orbit-c"></span><span class="orbit orbit-d"></span>
+            <span class="ticks ticks-a"></span><span class="ticks ticks-b"></span><span class="radar"></span><span class="crosshair"></span>
+            <span class="center"><b>JΛRVIS</b><span class="wave"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span></span>
+          </button>
+          <div class="voice-copy working" id="voice-state"><strong>◉ &nbsp; ICH PRÜFE DAS …</strong></div>
+          <div class="home-upload-wrap"><input id="home-file-input" type="file" multiple hidden><button class="home-upload" id="home-attach-button" type="button" aria-label="Datei an JARVIS senden">＋</button><span>DATEI SENDEN</span></div>
+        </section>
 
-    <main class="core-stage">
-      <button class="core" id="voice-core" type="button" aria-label="Gedrückt halten für Sprachdemo">
-        <i class="ring ring-one"></i><i class="ring ring-two"></i><i class="ring ring-three"></i>
-        <i class="cross"></i><i class="sweep"></i>
-        <span class="core-center"><b>JARVIS</b><span class="wave"><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span></span>
-      </button>
-      <div class="voice-state" id="voice-state">◉ &nbsp; BEREIT</div>
-      <p class="voice-hint" id="voice-hint">Ring gedrückt halten · noch keine echte Aufnahme</p>
-      <button class="mobile-dashboard-button" id="mobile-dashboard-button" type="button">DASHBOARD ÖFFNEN <span>⌄</span></button>
-    </main>
+        <section class="screen chat" aria-label="JARVIS Chatseite">
+          <div class="page-title"><div><small>SEITE 02</small><h1>UNTERHALTUNG</h1></div><button id="new-session" type="button">＋ NEU</button></div>
+          <select id="sessions" hidden aria-label="Unterhaltung"><option value="">Aktive Unterhaltung</option></select>
+          <div class="messages" id="messages" aria-live="polite">
+            <article class="bubble user"><small>LIAM · 14:20</small><p>Welche Filme laufen heute Abend im Kino?</p></article>
+            <article class="bubble ack"><small>JARVIS · SOFORT</small><p>Ich rufe die aktuellen Informationen ab, einen Moment, Sir.</p><span class="thinking"><i></i><i></i><i></i></span></article>
+            <article class="bubble jarvis"><small>JARVIS · 14:20</small><p>Heute Abend laufen unter anderem Dune, Minecraft und Mission: Impossible. Soll ich auch die Spielzeiten auflisten?</p><div class="source">◈ Quelle geprüft · Kinoprogramm aktuell</div></article>
+          </div>
+          <form class="composer" id="composer">
+            <input id="file-input" type="file" multiple hidden>
+            <button class="attach" id="attach-button" type="button" aria-label="Datei anhängen">＋</button>
+            <textarea id="message-input" rows="1" placeholder="Nachricht an JARVIS …"></textarea>
+            <button class="mic" id="mic-button" type="button" aria-label="Sprache aufnehmen">●</button>
+            <button class="send" id="send-button" type="submit" aria-label="Senden">›</button>
+          </form>
+          <div class="composer-hint"><span id="file-state">TEXT · AUDIO · DATEI</span><span id="chat-status">MEMORY AKTIV</span></div>
+        </section>
 
-    <aside class="right-rail" id="dashboard">
-      <section class="panel chat-panel">
-        <div class="panel-head"><span>JARVIS // CHAT</span><b>SCHNITTSTELLE V1</b></div>
-        <div class="session-row">
-          <label><span class="sr-only">Chatsession</span><select id="sessions"><option>Aktive Unterhaltung</option><option>Dashboard &amp; App</option><option>Ideen &amp; Notizen</option></select></label>
-          <button id="new-session" type="button">＋ NEU</button>
-        </div>
-        <div class="messages" id="messages" aria-live="polite">
-          <div class="message jarvis">Guten Tag, Liam. Die neue Oberfläche ist bereit für den Aufbau.</div>
-          <div class="message liam">Perfekt. Telegram soll später trotzdem erhalten bleiben.</div>
-          <div class="message jarvis">Bestätigt. Diese PWA wird ein zusätzlicher Zugang, kein Ersatz.</div>
-        </div>
-        <div class="chat-status"><span class="live-dot"></span><span id="chat-status">BEREIT</span></div>
-      </section>
+        <section class="screen system" aria-label="JARVIS Systemseite">
+          <div class="page-title"><div><small>SEITE 03</small><h1>SYSTEMSTATUS</h1></div><span class="shield">◆ SICHER</span></div>
+          <div class="health"><div class="health-ring"><strong id="health-value">100</strong><small>%</small></div><div><small>GESAMTZUSTAND</small><h2 id="health-title">ALLE SYSTEME BEREIT</h2><p id="health-copy">Keine schweren Fehler erkannt.</p></div></div>
+          <div class="services">
+            <article><i class="ok"></i><span>JARVIS / RENDER</span><strong id="render-status">ONLINE</strong><small>Antwortweg bereit</small></article>
+            <article><i class="ok"></i><span>MEMORY / NEON</span><strong id="memory-status">VERBUNDEN</strong><small>dauerhaft gespeichert</small></article>
+            <article><i class="ok"></i><span>GEMINI</span><strong id="gemini-status">BEREIT</strong><small>Denken + Spracheingabe</small></article>
+            <article><i class="ok"></i><span>FISH AUDIO</span><strong id="fish-status">BEREIT</strong><small>Sprachausgabe aktiv</small></article>
+          </div>
+          <div class="events"><div class="section-head"><span>LETZTE MELDUNGEN</span><b id="events-mode">LIVE</b></div><div id="events-list"><p><time>14:20</time><span>Recherche abgeschlossen</span></p><p><time>14:18</time><span>Memory sicher synchronisiert</span></p><p><time>14:16</time><span>iPhone-Gerät verbunden</span></p><p><time>14:15</time><span>JARVIS-Dienst gestartet</span></p></div></div>
+          <div class="error-clear" id="error-panel"><i>✓</i><div><strong>KEINE KRITISCHEN FEHLER</strong><span>Bei einem schweren Fehler nennt JARVIS die Ursache hier verständlich.</span></div></div>
+        </section>
+      </div>
+    </div>
 
-      <section class="panel composer-panel">
-        <div class="panel-head"><span>EINGABE // TEXT &amp; SPRACHE</span><b>DASHBOARD</b></div>
-        <div class="composer-tools">
-          <label>Denkstufe<select id="thinking"><option>GERING</option><option>MITTEL</option><option>HOCH</option></select></label>
-          <input id="file-input" type="file" multiple hidden>
-          <button id="attach-button" type="button" aria-label="Datei auswählen">＋</button>
-        </div>
-        <textarea id="message-input" placeholder="Nachricht an JARVIS …" rows="3"></textarea>
-        <div class="send-row"><span id="file-state">KEINE DATEI</span><button id="send-button" type="button">SENDEN ›</button></div>
-      </section>
-
-      <section class="panel quick-actions-panel" id="quick-actions-panel">
-        <div class="panel-head"><span>SCHNELLFUNKTIONEN</span><b>ERWEITERBAR</b></div>
-        <div class="quick-actions" id="quick-actions"></div>
-      </section>
-
-      <section class="panel mobile-install-help" id="ios-help">
-        <div class="panel-head"><span>INSTALLATION // iPHONE</span><b>SAFARI</b></div>
-        <p>Teilen antippen und danach „Zum Home-Bildschirm“ wählen.</p>
-      </section>
-    </aside>
-
-    <footer><span>JARVIS // LIAM</span><span>STUFE 03 · SICHERE GERÄTEFREIGABE</span></footer>
-  </div>
+    <nav class="pager" aria-label="Seiten"><button class="active" data-go="0" type="button"><i></i><span>JARVIS</span></button><button data-go="1" type="button"><i></i><span>CHAT</span></button><button data-go="2" type="button"><i></i><span>SYSTEM</span></button></nav>
+  </main>
   <script type="module" src="app.js"></script>
 </body>
 </html>

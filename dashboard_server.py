@@ -20,6 +20,7 @@ MAX_SESSION_MESSAGES = 100
 MAX_SESSION_TITLE_CHARS = 60
 MAX_REQUEST_BYTES = 64 * 1024
 DASHBOARD_COOKIE_NAME = "__Host-liam-jarvis-device"
+DASHBOARD_COOKIE_LIFETIME_DAYS = 3650
 
 
 def dashboard_access_token(telegram_token: str, owner_id: int) -> str:
@@ -238,6 +239,17 @@ class JsonHandler(tornado.web.RequestHandler):
         self.set_header("Content-Type", "application/json; charset=utf-8")
         self.finish(json.dumps(payload, ensure_ascii=False))
 
+    def set_device_cookie(self, token: str) -> None:
+        self.set_cookie(
+            DASHBOARD_COOKIE_NAME,
+            token,
+            path="/",
+            expires_days=DASHBOARD_COOKIE_LIFETIME_DAYS,
+            secure=True,
+            httponly=True,
+            samesite="Strict",
+        )
+
     def require_auth(self) -> bool:
         if self.context.owner_id is None:
             self.write_json({"error": "Dashboard ist noch nicht für ein Gerät freigegeben."}, 503)
@@ -254,6 +266,8 @@ class JsonHandler(tornado.web.RequestHandler):
         if not bearer_ok and not cookie_ok:
             self.write_json({"error": "Gerät nicht freigegeben."}, 401)
             return False
+        if cookie_ok:
+            self.set_device_cookie(expected)
         return True
 
     def body_json(self) -> dict:
@@ -291,15 +305,7 @@ class DashboardPairHandler(JsonHandler):
         if not hmac.compare_digest(supplied, expected):
             self.write_json({"error": "Gerätecode ungültig."}, 401)
             return
-        self.set_cookie(
-            DASHBOARD_COOKIE_NAME,
-            expected,
-            path="/",
-            expires_days=365,
-            secure=True,
-            httponly=True,
-            samesite="Strict",
-        )
+        self.set_device_cookie(expected)
         self.write_json({"paired": True})
 
 

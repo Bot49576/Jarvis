@@ -10,6 +10,7 @@ from tornado.testing import AsyncHTTPTestCase
 
 from dashboard_server import (
     DASHBOARD_COOKIE_NAME,
+    DASHBOARD_COOKIE_LIFETIME_DAYS,
     DashboardContext,
     DashboardSessionStore,
     dashboard_access_token,
@@ -152,6 +153,7 @@ class DashboardHttpTests(AsyncHTTPTestCase):
         self.assertIn("Secure", cookie)
         self.assertIn("SameSite=Strict", cookie)
         self.assertIn("Path=/", cookie)
+        self.assertEqual(DASHBOARD_COOKIE_LIFETIME_DAYS, 3650)
 
         cookie_value = cookie.split(";", 1)[0]
         status = self.fetch(
@@ -160,6 +162,7 @@ class DashboardHttpTests(AsyncHTTPTestCase):
         )
         self.assertEqual(status.code, 200)
         self.assertTrue(self.decode(status)["online"])
+        self.assertIn(f"{DASHBOARD_COOKIE_NAME}=", status.headers["Set-Cookie"])
 
     def test_pairing_rejects_wrong_token_and_foreign_origin(self):
         wrong = self.fetch(
@@ -215,6 +218,16 @@ class DashboardHttpTests(AsyncHTTPTestCase):
         self.assertEqual(response.code, 200)
         self.assertEqual(response.headers["X-Frame-Options"], "DENY")
         self.assertIn("default-src 'self'", response.headers["Content-Security-Policy"])
+
+    def test_approved_dashboard_contains_three_pages_and_two_uploads(self):
+        source = (Path(__file__).parent / "dashboard" / "index.html").read_text(
+            encoding="utf-8"
+        )
+        self.assertEqual(source.count('class="screen '), 3)
+        self.assertIn('id="home-attach-button"', source)
+        self.assertIn('id="attach-button"', source)
+        self.assertIn("LIAM'S PRIVATE INTERFACE", source)
+        self.assertNotIn("Lokale Bedienungsdemo", source)
 
     def test_pairing_fragment_is_consumed_only_in_the_browser(self):
         source = (Path(__file__).parent / "dashboard" / "api-client.js").read_text(

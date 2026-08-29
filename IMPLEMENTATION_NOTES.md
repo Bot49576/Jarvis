@@ -80,8 +80,16 @@ werden. Dann beantwortet der Bot keine fremden Nutzer.
 - Nur Liams numerische Telegram-Kennung wird bei Render als erlaubter Besitzer hinterlegt. Fremde Telegram-Nutzer und nicht freigegebene Browser erhalten keinen Dashboard-Zugang.
 - Ein freizugebendes Gerät öffnet einmalig einen persönlichen Freigabelink. Der geheime Teil steht ausschließlich hinter `#` und wird dadurch nicht an Render oder andere Server übertragen.
 - Das Dashboard entfernt den geheimen Teil sofort aus der sichtbaren Adresszeile und tauscht ihn über die eigene Render-Adresse gegen ein geschütztes Geräte-Cookie ein.
-- Das Cookie ist ein Jahr gültig, nur über HTTPS übertragbar und für JavaScript unsichtbar. Damit wird es beim Hinzufügen zum iPhone-Startbildschirm in die PWA übernommen; normaler Browser-Speicher wird von iOS dagegen nicht kopiert.
+- Das Cookie ist auf dauerhafte Nutzung ausgelegt, wird bei jedem erfolgreichen Zugriff automatisch verlängert, ist nur über HTTPS übertragbar und für JavaScript unsichtbar. Damit wird es beim Hinzufügen zum iPhone-Startbildschirm in die PWA übernommen; normaler Browser-Speicher wird von iOS dagegen nicht kopiert. Eine neue Freigabe ist erst nach Widerruf, gelöschten App-/Browserdaten oder einer vom Betriebssystem erzwungenen Löschung nötig.
 - Bereits freigegebene Desktop-Browser mit dem älteren lokalen Zugang bleiben während der Umstellung kompatibel.
 - Ein unvollständiger oder veränderter Schlüssel wird abgewiesen. Das Dashboard bleibt dann gesperrt und zeigt den Fehler rot an.
 - Derselbe geprüfte Freigabelink kann gezielt auf Liams iPhone und dem vorgesehenen Desktop geöffnet werden. Ein bloßer Aufruf der Dashboard-Adresse ohne Gerätefreigabe reicht nicht aus.
 - Telegram, Fish Audio, Gemini und das bestehende gemeinsame Memory bleiben durch diese Stufe unverändert.
+
+## Abgenommenes Drei-Seiten-Design – Schritt 02
+
+- Die bisherige Demo-Oberfläche ist lokal durch das abgenommene Design mit Startseite, Vollbild-Chat und Systemseite ersetzt.
+- Die Startseite enthält den dynamischen JARVIS-Ring und einen eigenen Datei-Upload. Der Chat besitzt weiterhin einen zweiten, getrennten Datei-Upload.
+- Seitenwechsel über die untere Navigation und Wischgesten funktionieren. Die lokale Browser-Prüfung aller drei Seiten verlief ohne JavaScript-Fehler.
+- Die sichtbaren Nachrichten und Systemwerte sind in diesem Schritt noch reine Gestaltungsbeispiele. Ring, Sprache, Chat, Uploads und Live-Systemdaten werden erst in den ausdrücklich freigegebenen Schritten 03 bis 05 angeschlossen.
+- Dieser Stand ist nur lokal gespeichert und noch nicht zu GitHub oder Render veröffentlicht.
