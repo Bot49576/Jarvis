@@ -28,7 +28,7 @@
             <span class="center"><b>JΛRVIS</b><span class="wave"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span></span>
           </button>
           <div class="voice-copy" id="voice-state" aria-live="polite"><strong>◉ &nbsp; BEREIT</strong></div>
-          <div class="home-upload-wrap"><input id="home-file-input" type="file" multiple hidden><button class="home-upload" id="home-attach-button" type="button" aria-label="Datei für JARVIS auswählen">＋</button><span id="home-file-state">DATEI SENDEN</span></div>
+          <div class="home-upload-wrap"><input id="home-file-input" type="file" accept="image/*,.pdf,.txt,.md,.csv,.json" multiple hidden><button class="home-upload" id="home-attach-button" type="button" aria-label="Datei für JARVIS auswählen">＋</button><span id="home-file-state">DATEI SENDEN</span></div>
         </section>
 
         <section class="screen chat" aria-label="JARVIS Chatseite">
@@ -40,7 +40,7 @@
             <article class="bubble jarvis"><small>JARVIS · 14:20</small><p>Heute Abend laufen unter anderem Dune, Minecraft und Mission: Impossible. Soll ich auch die Spielzeiten auflisten?</p><div class="source">◈ Quelle geprüft · Kinoprogramm aktuell</div></article>
           </div>
           <form class="composer" id="composer">
-            <input id="file-input" type="file" multiple hidden>
+            <input id="file-input" type="file" accept="image/*,.pdf,.txt,.md,.csv,.json" multiple hidden>
             <button class="attach" id="attach-button" type="button" aria-label="Datei anhängen">＋</button>
             <textarea id="message-input" rows="1" placeholder="Nachricht an JARVIS …"></textarea>
             <button class="mic" id="mic-button" type="button" aria-label="Sprache aufnehmen">●</button>

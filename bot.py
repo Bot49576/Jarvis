@@ -604,12 +604,20 @@ def interaction_sources(interaction) -> list[tuple[str, str]]:
 
 
 def ask_gemini(
-    user_text: str, state: ChatMemory, research: bool, deep: bool
+    user_text: str,
+    state: ChatMemory,
+    research: bool,
+    deep: bool,
+    attachments: list[dict] | None = None,
 ) -> AssistantReply | None:
     if not gemini_client:
         print("Gemini: GEMINI_API_KEY fehlt.")
         return None
 
+    attachments = attachments or []
+    # Die Interactions-Websuche nimmt in diesem kleinen Setup keine Binärteile an.
+    # Dateifragen laufen deshalb multimodal über dieselbe Gemini-Chat-API.
+    research = research and not attachments
     thinking_level = "medium" if deep else "low"
     system_instruction = SYSTEM_PROMPT + "\n\n" + LIAM_BASE_PROFILE + memory_context(state)
     if research:
@@ -669,7 +677,16 @@ def ask_gemini(
                     config=config,
                     history=history_contents(state.messages),
                 )
-                response = chat.send_message(user_text)
+                message = user_text
+                if attachments:
+                    message = [types.Part.from_text(text=user_text)] + [
+                        types.Part.from_bytes(
+                            data=attachment["body"],
+                            mime_type=attachment["content_type"],
+                        )
+                        for attachment in attachments
+                    ]
+                response = chat.send_message(message)
                 print_usage(response, f"Antwort Versuch {attempt}")
                 answer = (response.text or "").strip()
                 if answer:
@@ -861,8 +878,11 @@ def memory_status(state: ChatMemory) -> str:
     )
 
 
-async def process_user_text(user_id: int, user_text: str) -> AssistantReply:
-    """Gemeinsame JARVIS-Logik für Telegram und das spätere Dashboard."""
+async def process_user_text(
+    user_id: int, user_text: str, attachments: list[dict] | None = None
+) -> AssistantReply:
+    """Gemeinsame JARVIS-Logik für Telegram und Dashboard."""
+    attachments = attachments or []
     async with get_chat_lock(user_id):
         state = await asyncio.to_thread(memory_store.load, user_id)
         lowered = user_text.casefold().strip()
@@ -928,7 +948,9 @@ async def process_user_text(user_id: int, user_text: str) -> AssistantReply:
 
         research = wants_web_search(user_text)
         deep = wants_deeper_thinking(user_text)
-        reply = await asyncio.to_thread(ask_gemini, user_text, state, research, deep)
+        reply = await asyncio.to_thread(
+            ask_gemini, user_text, state, research, deep, attachments
+        )
         if not reply:
             return AssistantReply(
                 "Gemini konnte gerade keine verwertbare Antwort erzeugen.",
@@ -937,7 +959,17 @@ async def process_user_text(user_id: int, user_text: str) -> AssistantReply:
 
         state.messages.extend(
             [
-                {"role": "user", "text": clean_text(user_text)},
+                {
+                    "role": "user",
+                    "text": clean_text(user_text)
+                    + (
+                        " [Dateien: "
+                        + ", ".join(item["filename"] for item in attachments)
+                        + "]"
+                        if attachments
+                        else ""
+                    ),
+                },
                 {"role": "assistant", "text": clean_text(reply.text)},
             ]
         )
@@ -1025,13 +1057,25 @@ async def handle_update(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 def dashboard_status() -> dict:
     return {
         "online": True,
-        "dashboard_api": "v1",
+        "dashboard_api": "v2",
         "memory": "neon" if memory_store.persistent else "ram",
         "gemini_model": GEMINI_MODEL,
         "research": "available",
         "voice_output": "available",
-        "voice_input": "telegram",
+        "voice_input": "telegram+dashboard",
+        "file_input": "available",
     }
+
+
+async def dashboard_transcribe_audio(audio_data: bytes, mime_type: str) -> str | None:
+    return await asyncio.to_thread(transcribe_audio, audio_data, mime_type)
+
+
+async def dashboard_synthesize_speech(text: str) -> bytes | None:
+    spoken = text_for_speech(text)
+    if not spoken:
+        return None
+    return await asyncio.to_thread(text_to_speech, spoken)
 
 
 def main() -> None:
@@ -1084,6 +1128,8 @@ def main() -> None:
         allowed_origin=WEBHOOK_BASE_URL.rstrip("/"),
         session_store=dashboard_sessions,
         process_text=process_user_text,
+        transcribe_audio=dashboard_transcribe_audio,
+        synthesize_speech=dashboard_synthesize_speech,
         status=dashboard_status,
     )
     asyncio.run(

@@ -7,11 +7,20 @@ const buttons = [...document.querySelectorAll('[data-go]')];
 const topStatus = document.querySelector('#top-status');
 const voiceCore = document.querySelector('#voice-core');
 const voiceState = document.querySelector('#voice-state');
+const micButton = document.querySelector('#mic-button');
+const composer = document.querySelector('#composer');
+const messageInput = document.querySelector('#message-input');
+const sendButton = document.querySelector('#send-button');
+const messages = document.querySelector('#messages');
+const sessions = document.querySelector('#sessions');
+const chatStatus = document.querySelector('#chat-status');
 const homeAttachButton = document.querySelector('#home-attach-button');
 const homeFileInput = document.querySelector('#home-file-input');
 const homeFileState = document.querySelector('#home-file-state');
+const chatAttachButton = document.querySelector('#attach-button');
 const chatFileInput = document.querySelector('#file-input');
 const fileState = document.querySelector('#file-state');
+const installButton = document.querySelector('#install-button');
 const pairingResultPromise = Promise.resolve(consumePairingTokenFromFragment());
 const dashboardClient = new DashboardClient();
 const localPreview = isLocalPreview();
@@ -21,15 +30,24 @@ const visualizer = createJarvisVisualizer({
   voiceState,
   topStatus,
 });
+
 let page = 0;
 let pointerStart = null;
 let installPrompt = null;
+let connected = false;
+let busy = false;
+let pendingFiles = [];
 let microphoneStream = null;
-let audioContext = null;
-let analyser = null;
+let inputAudioContext = null;
+let inputAnalyser = null;
 let microphoneFrame = null;
 let microphoneStarting = false;
-let pendingFiles = [];
+let mediaRecorder = null;
+let recordedChunks = [];
+let recordingTimer = null;
+let activeAudio = null;
+let outputAudioContext = null;
+let outputFrame = null;
 
 function showPage(nextPage) {
   page = Math.max(0, Math.min(2, nextPage));
@@ -48,26 +66,127 @@ track.addEventListener('pointerup', (event) => {
 });
 track.addEventListener('pointercancel', () => { pointerStart = null; });
 
-async function verifyDeviceAccess() {
-  const result = await pairingResultPromise;
-  if (result === 'invalid') {
+function currentTime() {
+  return new Intl.DateTimeFormat('de-AT', { hour: '2-digit', minute: '2-digit' }).format(new Date());
+}
+
+function appendMessage(role, text, { sources = [], files = [] } = {}) {
+  const article = document.createElement('article');
+  article.className = `bubble ${role}`;
+  const author = role === 'user' ? 'LIAM' : 'JARVIS';
+  const meta = document.createElement('small');
+  meta.textContent = `${author} · ${currentTime()}`;
+  const paragraph = document.createElement('p');
+  paragraph.textContent = text;
+  article.append(meta, paragraph);
+
+  if (files.length) {
+    const attachmentLine = document.createElement('div');
+    attachmentLine.className = 'source';
+    attachmentLine.textContent = `⌁ ${files.join(', ')}`;
+    article.append(attachmentLine);
+  }
+  if (sources.length) {
+    const sourceLine = document.createElement('div');
+    sourceLine.className = 'source source-links';
+    sourceLine.append('◈ ');
+    sources.forEach((source, index) => {
+      if (index) sourceLine.append(' · ');
+      const link = document.createElement('a');
+      link.textContent = source.title || `Quelle ${index + 1}`;
+      link.href = /^https?:\/\//i.test(source.url || '') ? source.url : '#';
+      link.target = '_blank';
+      link.rel = 'noopener noreferrer';
+      sourceLine.append(link);
+    });
+    article.append(sourceLine);
+  }
+  messages.append(article);
+  messages.scrollTop = messages.scrollHeight;
+  return article;
+}
+
+function setBusy(nextBusy, label = '') {
+  busy = nextBusy;
+  sendButton.disabled = nextBusy;
+  chatAttachButton.disabled = nextBusy;
+  micButton.disabled = nextBusy;
+  voiceCore.disabled = nextBusy;
+  if (label) chatStatus.textContent = label;
+}
+
+function showError(error) {
+  const message = error instanceof Error ? error.message : 'JARVIS ist gerade nicht erreichbar.';
+  appendMessage('jarvis', message);
+  chatStatus.textContent = 'FEHLER';
+  visualizer.setState(navigator.onLine ? 'error' : 'offline', '◉  ANFRAGE FEHLGESCHLAGEN');
+}
+
+function renderSession(session) {
+  messages.replaceChildren();
+  session.messages.forEach((message) => appendMessage(
+    message.role === 'user' ? 'user' : 'jarvis',
+    message.text,
+  ));
+}
+
+async function loadSession(sessionId) {
+  renderSession(await dashboardClient.session(sessionId));
+}
+
+async function connectDashboard() {
+  const pairingResult = await pairingResultPromise;
+  if (pairingResult === 'invalid') {
     visualizer.setState('error', '◉  GERÄT NICHT FREIGEGEBEN');
+    chatStatus.textContent = 'NICHT FREIGEGEBEN';
     return;
   }
   try {
     await dashboardClient.status();
-    visualizer.setState('ready', result === 'paired' ? '◉  GERÄT VERBUNDEN' : '');
-  } catch {
+    const payload = await dashboardClient.sessions();
+    sessions.replaceChildren(...payload.sessions.map(
+      (session) => new Option(session.title, session.session_id),
+    ));
+    if (sessions.value) await loadSession(sessions.value);
+    connected = true;
+    chatStatus.textContent = 'MEMORY AKTIV';
+    visualizer.setState('ready', pairingResult === 'paired' ? '◉  GERÄT VERBUNDEN' : '');
+  } catch (error) {
+    connected = false;
     if (localPreview) {
+      chatStatus.textContent = 'LOKALE ANSICHT';
       visualizer.setState('ready');
       return;
     }
-    visualizer.setState('offline');
+    showError(error);
   }
 }
 
-function sampleMicrophone() {
-  if (!analyser) return;
+function selectedFileLabel(files) {
+  if (!files.length) return 'TEXT · AUDIO · DATEI';
+  return files.length === 1 ? files[0].name : `${files.length} DATEIEN BEREIT`;
+}
+
+function setPendingFiles(files) {
+  pendingFiles = [...files].slice(0, 4);
+  const label = selectedFileLabel(pendingFiles);
+  fileState.textContent = label;
+  homeFileState.textContent = pendingFiles.length ? label : 'DATEI SENDEN';
+  homeFileState.title = pendingFiles.length ? label : '';
+}
+
+function chooseHomeFiles() { homeFileInput.click(); }
+function chooseChatFiles() { chatFileInput.click(); }
+
+homeAttachButton.addEventListener('click', chooseHomeFiles);
+chatAttachButton.addEventListener('click', chooseChatFiles);
+homeFileInput.addEventListener('change', () => {
+  setPendingFiles(homeFileInput.files);
+  showPage(1);
+});
+chatFileInput.addEventListener('change', () => setPendingFiles(chatFileInput.files));
+
+function sampleAnalyser(analyser, callback) {
   const samples = new Uint8Array(analyser.fftSize);
   analyser.getByteTimeDomainData(samples);
   let sum = 0;
@@ -75,27 +194,86 @@ function sampleMicrophone() {
     const normalized = (sample - 128) / 128;
     sum += normalized * normalized;
   }
-  visualizer.setVoiceLevel(Math.min(1, Math.sqrt(sum / samples.length) * 7.5));
+  callback(Math.min(1, Math.sqrt(sum / samples.length) * 7.5));
+}
+
+function sampleMicrophone() {
+  if (!inputAnalyser) return;
+  sampleAnalyser(inputAnalyser, (level) => visualizer.setVoiceLevel(level));
   microphoneFrame = requestAnimationFrame(sampleMicrophone);
 }
 
-async function stopListening(nextState = 'ready') {
+function recordingMimeType() {
+  const types = ['audio/mp4', 'audio/webm;codecs=opus', 'audio/webm'];
+  return types.find((type) => MediaRecorder.isTypeSupported(type)) || '';
+}
+
+function createAudioContext() {
+  const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+  if (!AudioContextClass) throw new Error('Audioverarbeitung wird nicht unterstützt.');
+  return new AudioContextClass();
+}
+
+async function releaseMicrophone(nextState = 'ready') {
   if (microphoneFrame !== null) cancelAnimationFrame(microphoneFrame);
   microphoneFrame = null;
-  analyser = null;
+  inputAnalyser = null;
   microphoneStream?.getTracks().forEach((track) => track.stop());
   microphoneStream = null;
-  if (audioContext) await audioContext.close().catch(() => {});
-  audioContext = null;
+  if (inputAudioContext) await inputAudioContext.close().catch(() => {});
+  inputAudioContext = null;
+  clearTimeout(recordingTimer);
+  recordingTimer = null;
   voiceCore.setAttribute('aria-pressed', 'false');
   voiceCore.setAttribute('aria-label', 'Spracheingabe starten');
+  micButton.classList.remove('recording');
+  micButton.setAttribute('aria-label', 'Sprache aufnehmen');
   visualizer.setState(nextState);
 }
 
-async function startListening() {
-  if (microphoneStarting) return;
-  if (!navigator.mediaDevices?.getUserMedia) {
-    visualizer.setState('error', '◉  MIKROFON NICHT VERFÜGBAR');
+async function transcribeAndSend(blob, mimeType) {
+  if (!blob.size) throw new Error('Die Sprachaufnahme war leer.');
+  showPage(1);
+  visualizer.setState('working', '◉  SPRACHE WIRD VERSTANDEN …');
+  chatStatus.textContent = 'SPRACHE WIRD VERARBEITET';
+  const extension = mimeType.includes('mp4') ? 'm4a' : 'webm';
+  const transcript = await dashboardClient.transcribe(blob, `aufnahme.${extension}`);
+  messageInput.value = transcript.text;
+  await sendCurrentMessage();
+}
+
+async function stopRecording(submit = true) {
+  const recorder = mediaRecorder;
+  mediaRecorder = null;
+  if (!recorder || recorder.state === 'inactive') {
+    await releaseMicrophone();
+    return;
+  }
+  const stopped = new Promise((resolve) => recorder.addEventListener('stop', resolve, { once: true }));
+  recorder.stop();
+  await stopped;
+  const mimeType = recorder.mimeType || recordingMimeType() || 'audio/webm';
+  const blob = new Blob(recordedChunks, { type: mimeType });
+  recordedChunks = [];
+  await releaseMicrophone(submit ? 'working' : 'ready');
+  if (submit) {
+    try {
+      await transcribeAndSend(blob, mimeType);
+    } catch (error) {
+      showError(error);
+      setBusy(false);
+    }
+  }
+}
+
+async function startRecording() {
+  if (microphoneStarting || mediaRecorder) return;
+  if (!connected) {
+    showError(new Error('Dieses Gerät ist noch nicht mit JARVIS verbunden.'));
+    return;
+  }
+  if (!navigator.mediaDevices?.getUserMedia || !window.MediaRecorder) {
+    showError(new Error('Spracheingabe wird auf diesem Gerät nicht unterstützt.'));
     return;
   }
   microphoneStarting = true;
@@ -103,69 +281,197 @@ async function startListening() {
     microphoneStream = await navigator.mediaDevices.getUserMedia({
       audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
     });
-    audioContext = new AudioContext();
-    analyser = audioContext.createAnalyser();
-    analyser.fftSize = 512;
-    analyser.smoothingTimeConstant = 0.72;
-    audioContext.createMediaStreamSource(microphoneStream).connect(analyser);
+    inputAudioContext = createAudioContext();
+    inputAnalyser = inputAudioContext.createAnalyser();
+    inputAnalyser.fftSize = 512;
+    inputAnalyser.smoothingTimeConstant = 0.72;
+    inputAudioContext.createMediaStreamSource(microphoneStream).connect(inputAnalyser);
+    const mimeType = recordingMimeType();
+    mediaRecorder = new MediaRecorder(microphoneStream, mimeType ? { mimeType } : undefined);
+    recordedChunks = [];
+    mediaRecorder.addEventListener('dataavailable', (event) => {
+      if (event.data.size) recordedChunks.push(event.data);
+    });
+    mediaRecorder.start(250);
     voiceCore.setAttribute('aria-pressed', 'true');
-    voiceCore.setAttribute('aria-label', 'Spracheingabe beenden');
+    voiceCore.setAttribute('aria-label', 'Spracheingabe senden');
+    micButton.classList.add('recording');
+    micButton.setAttribute('aria-label', 'Spracheingabe senden');
     visualizer.setState('listening');
+    chatStatus.textContent = 'HÖRT ZU · ERNEUT TIPPEN ZUM SENDEN';
     sampleMicrophone();
+    recordingTimer = setTimeout(() => stopRecording(true), 120_000);
   } catch {
-    await stopListening('error');
+    await releaseMicrophone('error');
   } finally {
     microphoneStarting = false;
   }
 }
 
-voiceCore.addEventListener('click', async () => {
+async function toggleRecording() {
   if (microphoneStarting) return;
-  if (microphoneStream) await stopListening();
-  else await startListening();
-});
+  if (mediaRecorder) await stopRecording(true);
+  else await startRecording();
+}
 
-homeAttachButton.addEventListener('click', () => homeFileInput.click());
-homeFileInput.addEventListener('change', () => {
-  pendingFiles = [...homeFileInput.files];
-  if (!pendingFiles.length) {
-    homeFileState.textContent = 'DATEI SENDEN';
+voiceCore.addEventListener('click', toggleRecording);
+micButton.addEventListener('click', toggleRecording);
+
+function stopOutputAudio() {
+  if (outputFrame !== null) cancelAnimationFrame(outputFrame);
+  outputFrame = null;
+  if (activeAudio) {
+    activeAudio.pause();
+    URL.revokeObjectURL(activeAudio.src);
+  }
+  activeAudio = null;
+  if (outputAudioContext) outputAudioContext.close().catch(() => {});
+  outputAudioContext = null;
+}
+
+function sampleOutput(analyser) {
+  if (!activeAudio || activeAudio.paused) return;
+  sampleAnalyser(analyser, (level) => visualizer.setVoiceLevel(level));
+  outputFrame = requestAnimationFrame(() => sampleOutput(analyser));
+}
+
+async function beginPlayback(audio, bubble) {
+  stopOutputAudio();
+  activeAudio = audio;
+  try {
+    await audio.play();
+    bubble.querySelector('.play-reply')?.remove();
+  } catch {
+    activeAudio = null;
+    if (!bubble.querySelector('.play-reply')) {
+      const playButton = document.createElement('button');
+      playButton.type = 'button';
+      playButton.className = 'play-reply';
+      playButton.textContent = '▶ ANTWORT ABSPIELEN';
+      playButton.addEventListener('click', () => beginPlayback(audio, bubble), { once: true });
+      bubble.append(playButton);
+    }
+    visualizer.setState('ready');
     return;
   }
-  const label = pendingFiles.length === 1 ? pendingFiles[0].name : `${pendingFiles.length} DATEIEN BEREIT`;
-  homeFileState.textContent = label;
-  homeFileState.title = label;
-  fileState.textContent = label;
   try {
-    const transfer = new DataTransfer();
-    pendingFiles.forEach((file) => transfer.items.add(file));
-    chatFileInput.files = transfer.files;
+    outputAudioContext = createAudioContext();
+    const analyser = outputAudioContext.createAnalyser();
+    analyser.fftSize = 512;
+    outputAudioContext.createMediaElementSource(audio).connect(analyser);
+    analyser.connect(outputAudioContext.destination);
+    await outputAudioContext.resume();
+    sampleOutput(analyser);
   } catch {
-    // iOS behält die Auswahl intern; die Übergabe an JARVIS folgt in Schritt 04.
+    if (outputAudioContext) outputAudioContext.close().catch(() => {});
+    outputAudioContext = null;
   }
-  showPage(1);
+  audio.addEventListener('ended', () => {
+    stopOutputAudio();
+    visualizer.setState('ready');
+    chatStatus.textContent = 'MEMORY AKTIV';
+  }, { once: true });
+  visualizer.setState('speaking');
+  chatStatus.textContent = 'JARVIS SPRICHT';
+}
+
+async function speakReply(text, bubble) {
+  try {
+    const blob = await dashboardClient.speech(text);
+    const audio = new Audio(URL.createObjectURL(blob));
+    audio.preload = 'auto';
+    await beginPlayback(audio, bubble);
+  } catch {
+    chatStatus.textContent = 'TEXTANTWORT BEREIT';
+    visualizer.setState('ready');
+  }
+}
+
+async function ensureSession() {
+  if (sessions.value) return sessions.value;
+  const session = await dashboardClient.createSession();
+  sessions.add(new Option(session.title, session.session_id), 0);
+  sessions.selectedIndex = 0;
+  return session.session_id;
+}
+
+async function sendCurrentMessage() {
+  if (busy) return;
+  const text = messageInput.value.trim();
+  const files = [...pendingFiles];
+  if (!text && !files.length) return;
+  if (!connected) {
+    showError(new Error('Dieses Gerät ist noch nicht mit JARVIS verbunden.'));
+    return;
+  }
+  setBusy(true, 'JARVIS ARBEITET');
+  visualizer.setState('working');
+  const visibleText = text || 'Bitte analysiere die angehängte Datei.';
+  appendMessage('user', visibleText, { files: files.map((file) => file.name) });
+  messageInput.value = '';
+  setPendingFiles([]);
+  homeFileInput.value = '';
+  chatFileInput.value = '';
+  try {
+    const sessionId = await ensureSession();
+    const reply = await dashboardClient.chat(sessionId, text, files);
+    const bubble = appendMessage('jarvis', reply.text, { sources: reply.sources || [] });
+    setBusy(false, reply.voice_enabled ? 'SPRACHAUSGABE WIRD GELADEN' : 'MEMORY AKTIV');
+    if (reply.voice_enabled) await speakReply(reply.text, bubble);
+    else visualizer.setState('ready');
+  } catch (error) {
+    setBusy(false);
+    showError(error);
+  }
+}
+
+composer.addEventListener('submit', (event) => {
+  event.preventDefault();
+  sendCurrentMessage();
+});
+messageInput.addEventListener('keydown', (event) => {
+  if (event.key === 'Enter' && !event.shiftKey) {
+    event.preventDefault();
+    sendCurrentMessage();
+  }
+});
+document.querySelector('#new-session').addEventListener('click', async () => {
+  if (!connected || busy) return;
+  try {
+    const session = await dashboardClient.createSession();
+    sessions.add(new Option(session.title, session.session_id), 0);
+    sessions.selectedIndex = 0;
+    messages.replaceChildren();
+    chatStatus.textContent = 'NEUE UNTERHALTUNG';
+  } catch (error) {
+    showError(error);
+  }
 });
 
 window.addEventListener('beforeinstallprompt', (event) => {
   event.preventDefault();
   installPrompt = event;
-  document.querySelector('#install-button').hidden = false;
+  installButton.hidden = false;
 });
-document.querySelector('#install-button').addEventListener('click', async () => {
+installButton.addEventListener('click', async () => {
   if (!installPrompt) return;
   installPrompt.prompt();
   await installPrompt.userChoice;
   installPrompt = null;
-  document.querySelector('#install-button').hidden = true;
+  installButton.hidden = true;
 });
 
-document.querySelector('#composer').addEventListener('submit', (event) => event.preventDefault());
 showPage(0);
-verifyDeviceAccess();
+connectDashboard();
 if ('serviceWorker' in navigator) window.addEventListener('load', () => navigator.serviceWorker.register('./sw.js'));
-window.addEventListener('offline', () => visualizer.setState('offline'));
-window.addEventListener('online', () => verifyDeviceAccess());
+window.addEventListener('offline', () => {
+  connected = false;
+  visualizer.setState('offline');
+});
+window.addEventListener('online', connectDashboard);
 window.addEventListener('pagehide', () => {
-  if (microphoneStream) stopListening();
+  if (mediaRecorder) stopRecording(false);
+  else if (microphoneStream) releaseMicrophone();
+  stopOutputAudio();
   visualizer.stop();
 });

@@ -102,3 +102,13 @@ werden. Dann beantwortet der Bot keine fremden Nutzer.
 - Der Plus-Knopf öffnet die Dateiauswahl, merkt die gewählten Dateien und übergibt sie sichtbar an die Chatseite. Das tatsächliche Senden und Verarbeiten der Auswahl gehört weiterhin zu Schritt 04.
 - Die mobile Ansicht wurde mit 390 × 844 Pixeln geprüft: kein Überlauf, alle Bedienelemente sichtbar und keine Browserfehler.
 - Mikrofon- und Dateiberechtigungen werden nicht umgangen. Der echte Berechtigungstest auf dem iPhone erfolgt nach Veröffentlichung im vollständigen Geräte-Endtest.
+
+## Verbundener Chat – Schritt 04
+
+- Textnachrichten der PWA laufen über die geschützte Dashboard-API v2 durch dieselbe `process_user_text`-Logik wie Telegram. Charakter, Memory-Befehle, Neon-Gedächtnis, Recherche und Fehlerrückfall bleiben dadurch identisch.
+- Die Mikrofontasten auf Start- und Chatseite nehmen höchstens zwei Minuten auf, zeigen den echten Pegel im Ring, lassen Gemini den Wortlaut erkennen und senden ihn anschließend als normale JARVIS-Anfrage.
+- Bis zu vier Bilder, PDF-, Text-, Markdown-, CSV- oder JSON-Dateien können pro Anfrage übergeben werden. Maximal 10 MB pro Datei und 18 MB insgesamt; im Memory werden nur Frage und Dateinamen gespeichert, niemals die Binärdaten.
+- Fish Audio erhält nur die bereits vorhandene kurze, linkfreie Sprachfassung. Wenn iOS die automatische Wiedergabe verhindert, erscheint ein eigener Abspielknopf statt eines Fehlers.
+- Quellen erscheinen getrennt unter der Antwort und werden nicht von Fish vorgelesen. Die Sprachbalken folgen während der Wiedergabe soweit vom Gerät unterstützt dem tatsächlichen Audiopegel.
+- Der komplette Textweg wurde lokal im iPhone-Format mit Gerätefreigabe, neu geladener Unterhaltung und einer simulierten JARVIS-Antwort getestet. Die Audio- und Datei-Endpunkte wurden ohne externe API-Kosten automatisiert geprüft.
+- Echte Mikrofonberechtigung, echte Gemini-Dateianalyse und Fish-Wiedergabe auf dem iPhone bleiben Teil des späteren Produktions-Endtests. Dieser Stand ist weiterhin nicht veröffentlicht.

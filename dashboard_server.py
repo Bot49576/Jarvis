@@ -18,7 +18,18 @@ from telegram import Update
 MAX_DASHBOARD_SESSIONS = 20
 MAX_SESSION_MESSAGES = 100
 MAX_SESSION_TITLE_CHARS = 60
-MAX_REQUEST_BYTES = 64 * 1024
+MAX_REQUEST_BYTES = 22 * 1024 * 1024
+MAX_UPLOAD_FILES = 4
+MAX_UPLOAD_FILE_BYTES = 10 * 1024 * 1024
+MAX_UPLOAD_TOTAL_BYTES = 18 * 1024 * 1024
+MAX_AUDIO_BYTES = 20 * 1024 * 1024
+ALLOWED_UPLOAD_TYPES = {
+    "application/json",
+    "application/pdf",
+    "text/csv",
+    "text/markdown",
+    "text/plain",
+}
 DASHBOARD_COOKIE_NAME = "__Host-liam-jarvis-device"
 DASHBOARD_COOKIE_LIFETIME_DAYS = 3650
 
@@ -220,7 +231,9 @@ class DashboardContext:
     owner_id: int | None
     allowed_origin: str
     session_store: DashboardSessionStore
-    process_text: Callable[[int, str], Awaitable[object]]
+    process_text: Callable[[int, str, list[dict]], Awaitable[object]]
+    transcribe_audio: Callable[[bytes, str], Awaitable[str | None]]
+    synthesize_speech: Callable[[str], Awaitable[bytes | None]]
     status: Callable[[], dict]
 
 
@@ -385,29 +398,80 @@ class DashboardSessionHandler(JsonHandler):
 
 
 class DashboardChatHandler(JsonHandler):
+    def parse_input(self) -> tuple[str, str, list[dict]]:
+        content_type = self.request.headers.get("Content-Type", "").casefold()
+        if content_type.startswith("multipart/form-data"):
+            session_id = self.get_body_argument("session_id", "")
+            text = self.get_body_argument("text", "")
+            uploaded = self.request.files.get("files", [])
+        else:
+            payload = self.body_json()
+            session_id = str(payload.get("session_id", ""))
+            text = str(payload.get("text", ""))
+            uploaded = []
+
+        cleaned_text = " ".join(text.strip().split())
+        if len(cleaned_text) > 8_000:
+            raise ValueError("Die Nachricht ist zu lang.")
+        if len(uploaded) > MAX_UPLOAD_FILES:
+            raise ValueError("Bitte höchstens vier Dateien gleichzeitig senden.")
+
+        attachments: list[dict] = []
+        total_bytes = 0
+        for upload in uploaded:
+            body = bytes(upload.get("body", b""))
+            raw_filename = str(upload.get("filename", "Datei")).replace("\\", "/")
+            filename = Path(raw_filename.rsplit("/", 1)[-1]).name[:120]
+            mime_type = str(upload.get("content_type", "")).casefold().split(";", 1)[0]
+            if mime_type in {"", "application/octet-stream"}:
+                mime_type = {
+                    ".csv": "text/csv",
+                    ".json": "application/json",
+                    ".md": "text/markdown",
+                    ".pdf": "application/pdf",
+                    ".txt": "text/plain",
+                }.get(Path(filename).suffix.casefold(), mime_type)
+            if not body:
+                raise ValueError(f"{filename} ist leer.")
+            if len(body) > MAX_UPLOAD_FILE_BYTES:
+                raise ValueError(f"{filename} ist größer als 10 MB.")
+            if not (mime_type.startswith("image/") or mime_type in ALLOWED_UPLOAD_TYPES):
+                raise ValueError(f"Der Dateityp von {filename} wird noch nicht unterstützt.")
+            total_bytes += len(body)
+            attachments.append(
+                {"filename": filename, "content_type": mime_type, "body": body}
+            )
+        if total_bytes > MAX_UPLOAD_TOTAL_BYTES:
+            raise ValueError("Die ausgewählten Dateien sind zusammen zu groß.")
+        if not cleaned_text and not attachments:
+            raise ValueError("Eine Nachricht oder Datei fehlt.")
+        if not cleaned_text:
+            cleaned_text = "Bitte analysiere die angehängte Datei und nenne mir das Wesentliche."
+        return session_id, cleaned_text, attachments
+
     async def post(self) -> None:
         if not self.require_auth():
             return
         try:
-            payload = self.body_json()
-            session_id = str(payload.get("session_id", ""))
-            text = " ".join(str(payload.get("text", "")).strip().split())
-            if not text:
-                raise ValueError("Eine Nachricht fehlt.")
-            if len(text) > 8_000:
-                raise ValueError("Die Nachricht ist zu lang.")
+            session_id, text, attachments = self.parse_input()
             session = await asyncio.to_thread(
                 self.context.session_store.get, self.context.owner_id, session_id
             )
             if not session:
                 self.write_json({"error": "Unterhaltung nicht gefunden."}, 404)
                 return
-            reply = await self.context.process_text(self.context.owner_id, text)
+            reply = await self.context.process_text(
+                self.context.owner_id, text, attachments
+            )
+            attachment_names = [item["filename"] for item in attachments]
+            session_text = text
+            if attachment_names:
+                session_text += "\n\nDateien: " + ", ".join(attachment_names)
             await asyncio.to_thread(
                 self.context.session_store.append_exchange,
                 self.context.owner_id,
                 session_id,
-                text,
+                session_text,
                 reply.text,
             )
         except ValueError as error:
@@ -420,8 +484,56 @@ class DashboardChatHandler(JsonHandler):
                     {"title": title, "url": url} for title, url in reply.sources
                 ],
                 "voice_enabled": reply.voice_enabled,
+                "files": [item["filename"] for item in attachments],
             }
         )
+
+
+class DashboardTranscribeHandler(JsonHandler):
+    async def post(self) -> None:
+        if not self.require_auth():
+            return
+        uploads = self.request.files.get("audio", [])
+        if len(uploads) != 1:
+            self.write_json({"error": "Eine Sprachaufnahme fehlt."}, 400)
+            return
+        upload = uploads[0]
+        audio_data = bytes(upload.get("body", b""))
+        mime_type = str(upload.get("content_type", "audio/webm"))
+        if not audio_data or len(audio_data) > MAX_AUDIO_BYTES:
+            self.write_json({"error": "Die Sprachaufnahme ist leer oder zu groß."}, 400)
+            return
+        if not mime_type.casefold().startswith("audio/"):
+            self.write_json({"error": "Ungültiges Audioformat."}, 400)
+            return
+        transcript = await self.context.transcribe_audio(audio_data, mime_type)
+        if not transcript:
+            self.write_json(
+                {"error": "Ich konnte die Aufnahme nicht sicher verstehen."}, 422
+            )
+            return
+        self.write_json({"text": transcript})
+
+
+class DashboardSpeechHandler(JsonHandler):
+    async def post(self) -> None:
+        if not self.require_auth():
+            return
+        try:
+            text = " ".join(str(self.body_json().get("text", "")).strip().split())
+        except ValueError as error:
+            self.write_json({"error": str(error)}, 400)
+            return
+        if not text or len(text) > 8_000:
+            self.write_json({"error": "Ungültiger Antworttext."}, 400)
+            return
+        audio_data = await self.context.synthesize_speech(text)
+        if not audio_data:
+            self.write_json({"error": "Sprachausgabe ist gerade nicht verfügbar."}, 502)
+            return
+        self.set_header("Content-Type", "audio/mpeg")
+        self.set_header("Content-Disposition", 'inline; filename="jarvis.mp3"')
+        self.finish(audio_data)
 
 
 class DashboardStaticHandler(tornado.web.StaticFileHandler):
@@ -433,7 +545,8 @@ class DashboardStaticHandler(tornado.web.StaticFileHandler):
             "Content-Security-Policy",
             "default-src 'self'; connect-src 'self'; img-src 'self' data:; "
             "style-src 'self'; script-src 'self'; manifest-src 'self'; "
-            "worker-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'",
+            "worker-src 'self'; media-src 'self' blob:; object-src 'none'; "
+            "base-uri 'none'; frame-ancestors 'none'",
         )
         if path.endswith("sw.js") or path.endswith("index.html"):
             self.set_header("Cache-Control", "no-cache")
@@ -449,6 +562,8 @@ def make_web_application(context: DashboardContext, dashboard_path: Path) -> tor
             (r"/api/dashboard/sessions", DashboardSessionsHandler, {"context": context}),
             (r"/api/dashboard/sessions/([0-9a-fA-F-]+)", DashboardSessionHandler, {"context": context}),
             (r"/api/dashboard/chat", DashboardChatHandler, {"context": context}),
+            (r"/api/dashboard/transcribe", DashboardTranscribeHandler, {"context": context}),
+            (r"/api/dashboard/speech", DashboardSpeechHandler, {"context": context}),
             (r"/", tornado.web.RedirectHandler, {"url": "/dashboard/", "permanent": False}),
             (
                 r"/dashboard/(.*)",

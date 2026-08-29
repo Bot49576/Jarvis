@@ -36,16 +36,31 @@ export class DashboardClient {
     return Boolean(this.token) || window.location.protocol === 'https:';
   }
 
+  authorizationHeaders() {
+    return this.token ? { Authorization: `Bearer ${this.token}` } : {};
+  }
+
   async request(path, options = {}) {
-    const authorization = this.token ? { Authorization: `Bearer ${this.token}` } : {};
     const response = await fetch(`${this.baseUrl}${path}`, {
       ...options,
       credentials: 'same-origin',
       headers: {
-        ...authorization,
+        ...this.authorizationHeaders(),
         'Content-Type': 'application/json',
         ...(options.headers || {}),
       },
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(payload.error || `JARVIS antwortet nicht (${response.status}).`);
+    return payload;
+  }
+
+  async requestForm(path, formData) {
+    const response = await fetch(`${this.baseUrl}${path}`, {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: this.authorizationHeaders(),
+      body: formData,
     });
     const payload = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(payload.error || `JARVIS antwortet nicht (${response.status}).`);
@@ -61,11 +76,36 @@ export class DashboardClient {
       body: JSON.stringify({ title }),
     });
   }
-  chat(sessionId, text) {
+  chat(sessionId, text, files = []) {
+    if (files.length) {
+      const form = new FormData();
+      form.append('session_id', sessionId);
+      form.append('text', text);
+      files.forEach((file) => form.append('files', file, file.name));
+      return this.requestForm('/api/dashboard/chat', form);
+    }
     return this.request('/api/dashboard/chat', {
       method: 'POST',
       body: JSON.stringify({ session_id: sessionId, text }),
     });
+  }
+  transcribe(audioBlob, filename = 'aufnahme.webm') {
+    const form = new FormData();
+    form.append('audio', audioBlob, filename);
+    return this.requestForm('/api/dashboard/transcribe', form);
+  }
+  async speech(text) {
+    const response = await fetch(`${this.baseUrl}/api/dashboard/speech`, {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { ...this.authorizationHeaders(), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text }),
+    });
+    if (!response.ok) {
+      const payload = await response.json().catch(() => ({}));
+      throw new Error(payload.error || `Sprachausgabe nicht verfügbar (${response.status}).`);
+    }
+    return response.blob();
   }
 }
 

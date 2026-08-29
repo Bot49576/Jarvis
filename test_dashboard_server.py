@@ -65,6 +65,26 @@ class SharedProcessingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(answered.text, "Bestätigt, Sir.")
         self.assertEqual(len(bot.memory_store.load(123).messages), 2)
 
+    async def test_dashboard_attachment_uses_shared_memory_without_storing_bytes(self):
+        attachment = {
+            "filename": "notiz.txt",
+            "content_type": "text/plain",
+            "body": b"Nordstern",
+        }
+        with patch.object(
+            bot,
+            "ask_gemini",
+            return_value=bot.AssistantReply("Datei verstanden."),
+        ) as ask:
+            reply = await bot.process_user_text(
+                123, "Was steht darin?", [attachment]
+            )
+        self.assertEqual(reply.text, "Datei verstanden.")
+        self.assertEqual(ask.call_args.args[4], [attachment])
+        stored = bot.memory_store.load(123).messages[0]["text"]
+        self.assertIn("notiz.txt", stored)
+        self.assertNotIn("Nordstern", stored)
+
 
 class DashboardHttpTests(AsyncHTTPTestCase):
     def get_app(self):
@@ -75,13 +95,25 @@ class DashboardHttpTests(AsyncHTTPTestCase):
         self.owner_id = 7356620618
         self.session_store = DashboardSessionStore("")
 
-        async def process_text(owner_id, text):
+        self.processed_attachments = []
+
+        async def process_text(owner_id, text, attachments):
             self.assertEqual(owner_id, self.owner_id)
+            self.processed_attachments = attachments
             return SimpleNamespace(
                 text=f"Antwort auf: {text}",
                 sources=[("Quelle", "https://example.com")],
                 voice_enabled=True,
             )
+
+        async def transcribe_audio(audio_data, mime_type):
+            self.assertTrue(audio_data)
+            self.assertTrue(mime_type.startswith("audio/"))
+            return "Hallo JARVIS"
+
+        async def synthesize_speech(text):
+            self.assertTrue(text)
+            return b"ID3-test-audio"
 
         telegram_application = SimpleNamespace(
             bot=SimpleNamespace(), update_queue=asyncio.Queue()
@@ -94,6 +126,8 @@ class DashboardHttpTests(AsyncHTTPTestCase):
             allowed_origin="https://jarvis.example",
             session_store=self.session_store,
             process_text=process_text,
+            transcribe_audio=transcribe_audio,
+            synthesize_speech=synthesize_speech,
             status=lambda: {"online": True, "memory": "neon"},
         )
         return make_web_application(context, dashboard_path)
@@ -129,6 +163,35 @@ class DashboardHttpTests(AsyncHTTPTestCase):
 
     def decode(self, response):
         return json.loads(response.body.decode("utf-8"))
+
+    @staticmethod
+    def multipart(fields, files):
+        boundary = "----liam-jarvis-test"
+        chunks = []
+        for name, value in fields.items():
+            chunks.extend(
+                [
+                    f"--{boundary}\r\n".encode(),
+                    f'Content-Disposition: form-data; name="{name}"\r\n\r\n'.encode(),
+                    str(value).encode(),
+                    b"\r\n",
+                ]
+            )
+        for field_name, filename, mime_type, body in files:
+            chunks.extend(
+                [
+                    f"--{boundary}\r\n".encode(),
+                    (
+                        f'Content-Disposition: form-data; name="{field_name}"; '
+                        f'filename="{filename}"\r\n'
+                    ).encode(),
+                    f"Content-Type: {mime_type}\r\n\r\n".encode(),
+                    body,
+                    b"\r\n",
+                ]
+            )
+        chunks.append(f"--{boundary}--\r\n".encode())
+        return b"".join(chunks), f"multipart/form-data; boundary={boundary}"
 
     def test_health_is_public_but_status_requires_device_token(self):
         health = self.fetch("/healthz")
@@ -209,6 +272,47 @@ class DashboardHttpTests(AsyncHTTPTestCase):
         )
         self.assertEqual(len(self.decode(loaded)["messages"]), 2)
 
+    def test_dashboard_chat_accepts_a_supported_file(self):
+        sessions = self.decode(
+            self.fetch("/api/dashboard/sessions", headers=self.auth_headers())
+        )["sessions"]
+        body, content_type = self.multipart(
+            {"session_id": sessions[0]["session_id"], "text": "Fasse das zusammen."},
+            [("files", "notiz.txt", "text/plain", b"Nordstern")],
+        )
+        response = self.fetch(
+            "/api/dashboard/chat",
+            method="POST",
+            headers={**self.auth_headers("https://jarvis.example"), "Content-Type": content_type},
+            body=body,
+        )
+        self.assertEqual(response.code, 200)
+        self.assertEqual(self.decode(response)["files"], ["notiz.txt"])
+        self.assertEqual(self.processed_attachments[0]["body"], b"Nordstern")
+
+    def test_dashboard_transcription_and_speech_are_protected(self):
+        body, content_type = self.multipart(
+            {}, [("audio", "aufnahme.webm", "audio/webm", b"audio-data")]
+        )
+        transcription = self.fetch(
+            "/api/dashboard/transcribe",
+            method="POST",
+            headers={**self.auth_headers("https://jarvis.example"), "Content-Type": content_type},
+            body=body,
+        )
+        self.assertEqual(transcription.code, 200)
+        self.assertEqual(self.decode(transcription)["text"], "Hallo JARVIS")
+
+        speech = self.fetch(
+            "/api/dashboard/speech",
+            method="POST",
+            headers={**self.auth_headers("https://jarvis.example"), "Content-Type": "application/json"},
+            body=json.dumps({"text": "Guten Tag, Sir."}),
+        )
+        self.assertEqual(speech.code, 200)
+        self.assertEqual(speech.headers["Content-Type"], "audio/mpeg")
+        self.assertEqual(speech.body, b"ID3-test-audio")
+
     def test_telegram_webhook_rejects_missing_secret(self):
         response = self.fetch("/telegram/webhook", method="POST", body="{}")
         self.assertEqual(response.code, 403)
@@ -242,6 +346,21 @@ class DashboardHttpTests(AsyncHTTPTestCase):
         self.assertIn("showPage(1)", app_source)
         self.assertIn("setVoiceLevel", visualizer_source)
         self.assertNotIn("SPRACHDEMO", visualizer_source)
+
+    def test_chat_client_connects_text_audio_files_and_speech(self):
+        app_source = (Path(__file__).parent / "dashboard" / "app.js").read_text(
+            encoding="utf-8"
+        )
+        client_source = (
+            Path(__file__).parent / "dashboard" / "api-client.js"
+        ).read_text(encoding="utf-8")
+        self.assertIn("new MediaRecorder", app_source)
+        self.assertIn("dashboardClient.transcribe", app_source)
+        self.assertIn("dashboardClient.chat", app_source)
+        self.assertIn("dashboardClient.speech", app_source)
+        self.assertIn("/api/dashboard/transcribe", client_source)
+        self.assertIn("/api/dashboard/speech", client_source)
+        self.assertIn("new FormData()", client_source)
 
     def test_pairing_fragment_is_consumed_only_in_the_browser(self):
         source = (Path(__file__).parent / "dashboard" / "api-client.js").read_text(

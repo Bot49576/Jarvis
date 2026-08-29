@@ -243,6 +243,34 @@ class JarvisLogicTests(unittest.TestCase):
         )
         sleep.assert_called_once()
 
+    def test_dashboard_file_is_sent_as_multimodal_part_without_web_tool(self):
+        sent_messages = []
+
+        class FakeChat:
+            def send_message(self, message):
+                sent_messages.append(message)
+                return SimpleNamespace(text="Datei gelesen.", usage_metadata=None)
+
+        class FakeChats:
+            def create(self, **_kwargs):
+                return FakeChat()
+
+        fake_client = SimpleNamespace(chats=FakeChats())
+        attachment = {
+            "filename": "notiz.txt",
+            "content_type": "text/plain",
+            "body": b"Nordstern",
+        }
+        with patch.object(bot, "gemini_client", fake_client):
+            reply = bot.ask_gemini(
+                "Lies die Datei aktuell.", ChatMemory(), True, False, [attachment]
+            )
+
+        self.assertEqual(reply.text, "Datei gelesen.")
+        self.assertEqual(len(sent_messages), 1)
+        self.assertEqual(len(sent_messages[0]), 2)
+        self.assertEqual(sent_messages[0][1].inline_data.mime_type, "text/plain")
+
     def test_empty_web_answer_is_retried_once(self):
         interactions = [
             SimpleNamespace(output_text="", steps=[]),

@@ -1,4 +1,4 @@
-const CACHE = 'liam-jarvis-pwa-v8';
+const CACHE = 'liam-jarvis-pwa-v9';
 const ASSETS = ['./', './index.html', './approved.css', './app.js', './api-client.js', './visualizer.js', './manifest.webmanifest', './icons/jarvis-icon.svg'];
 self.addEventListener('install', (event) => event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(ASSETS))));
 self.addEventListener('activate', (event) => event.waitUntil(caches.keys().then((keys) => Promise.all(keys.filter((key) => key !== CACHE).map((key) => caches.delete(key))))));

@@ -3,7 +3,7 @@ const STATE_COPY = {
   listening: { voice: '◉  ICH HÖRE ZU …', top: 'HÖRT ZU' },
   working: { voice: '◉  ICH PRÜFE DAS …', top: 'PRÜFT' },
   speaking: { voice: '◉  JARVIS ANTWORTET …', top: 'ANTWORTET' },
-  error: { voice: '◉  MIKROFON NICHT FREIGEGEBEN', top: 'MIKROFON GESPERRT' },
+  error: { voice: '◉  FEHLER', top: 'FEHLER' },
   offline: { voice: '◉  JARVIS IST OFFLINE', top: 'OFFLINE' },
 };
 
