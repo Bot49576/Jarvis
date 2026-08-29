@@ -1,0 +1,15 @@
+{
+  "name": "JARVIS für Liam",
+  "short_name": "JARVIS",
+  "description": "Installierbare JARVIS-Oberfläche für Liam",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#02070b",
+  "theme_color": "#02070b",
+  "lang": "de-AT",
+  "icons": [
+    { "src": "icons/jarvis-icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}

@@ -64,3 +64,13 @@ werden. Dann beantwortet der Bot keine fremden Nutzer.
 - automatische Speicherung jedes persönlichen Details als dauerhafter Fakt
 - OpenRouter, DDGS oder Groq
 - autonome Hintergrundfunktionen
+
+## Dashboard-Schnittstelle – Stufe 02
+
+- Telegram und Dashboard verwenden denselben Render-Webdienst und dieselbe geprüfte JARVIS-Antwortlogik.
+- `/healthz` meldet nur, ob der Dienst erreichbar ist. Chat, Status und Sessions benötigen immer eine gültige Geräteberechtigung.
+- Ohne `ALLOWED_TELEGRAM_USER_ID` bleibt die gesamte Dashboard-API absichtlich gesperrt. Die eigentliche Gerätefreigabe und Übergabe des Zugangsschlüssels erfolgt erst in Stufe 03.
+- Browser-Anfragen werden zusätzlich auf die eigene Render-Adresse begrenzt. Fremde Webseiten können die geschützte API nicht verwenden.
+- Dashboard-Sessions liegen in der neuen Tabelle `jarvis_dashboard_sessions_v1`. Die bestehende Tabelle `jarvis_chat_memory_v1` wird nicht verändert; JARVIS verwendet für beide Eingänge weiterhin Liams gemeinsames Memory.
+- Die PWA wird unter `/dashboard/` direkt vom vorhandenen Render-Dienst ausgeliefert. Telegram bleibt vollständig erhalten.
+- Ein Ausfall oder fehlender Gerätezugang wird in der Oberfläche rot angezeigt; Zuhören und Antwortsuche bleiben gelb, Bereit und Antworten cyan.

@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#02070b">
+  <meta name="description" content="Installierbare JARVIS-Oberfläche für Liam">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/jarvis-icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icons/jarvis-icon.svg">
+  <link rel="stylesheet" href="styles.css">
+  <title>JARVIS · Liam</title>
+</head>
+<body>
+  <div class="scanlines" aria-hidden="true"></div>
+  <div class="app-shell" id="app">
+    <header class="topbar">
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true"></span>
+        <div><strong>JARVIS</strong><small>LIAM INTERFACE · DASHBOARD</small></div>
+      </div>
+      <div class="system-state"><span class="live-dot"></span><b id="top-status">BEREIT</b><time id="clock">--:--:--</time></div>
+      <button class="install-button" id="install-button" type="button" hidden>INSTALLIEREN</button>
+    </header>
+
+    <aside class="left-rail" id="left-modules" aria-label="Konfigurierbare Anzeigen"></aside>
+
+    <main class="core-stage">
+      <button class="core" id="voice-core" type="button" aria-label="Gedrückt halten für Sprachdemo">
+        <i class="ring ring-one"></i><i class="ring ring-two"></i><i class="ring ring-three"></i>
+        <i class="cross"></i><i class="sweep"></i>
+        <span class="core-center"><b>JARVIS</b><span class="wave"><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span></span>
+      </button>
+      <div class="voice-state" id="voice-state">◉ &nbsp; BEREIT</div>
+      <p class="voice-hint" id="voice-hint">Ring gedrückt halten · noch keine echte Aufnahme</p>
+      <button class="mobile-dashboard-button" id="mobile-dashboard-button" type="button">DASHBOARD ÖFFNEN <span>⌄</span></button>
+    </main>
+
+    <aside class="right-rail" id="dashboard">
+      <section class="panel chat-panel">
+        <div class="panel-head"><span>JARVIS // CHAT</span><b>SCHNITTSTELLE V1</b></div>
+        <div class="session-row">
+          <label><span class="sr-only">Chatsession</span><select id="sessions"><option>Aktive Unterhaltung</option><option>Dashboard &amp; App</option><option>Ideen &amp; Notizen</option></select></label>
+          <button id="new-session" type="button">＋ NEU</button>
+        </div>
+        <div class="messages" id="messages" aria-live="polite">
+          <div class="message jarvis">Guten Tag, Liam. Die neue Oberfläche ist bereit für den Aufbau.</div>
+          <div class="message liam">Perfekt. Telegram soll später trotzdem erhalten bleiben.</div>
+          <div class="message jarvis">Bestätigt. Diese PWA wird ein zusätzlicher Zugang, kein Ersatz.</div>
+        </div>
+        <div class="chat-status"><span class="live-dot"></span><span id="chat-status">BEREIT</span></div>
+      </section>
+
+      <section class="panel composer-panel">
+        <div class="panel-head"><span>EINGABE // TEXT &amp; SPRACHE</span><b>DASHBOARD</b></div>
+        <div class="composer-tools">
+          <label>Denkstufe<select id="thinking"><option>GERING</option><option>MITTEL</option><option>HOCH</option></select></label>
+          <input id="file-input" type="file" multiple hidden>
+          <button id="attach-button" type="button" aria-label="Datei auswählen">＋</button>
+        </div>
+        <textarea id="message-input" placeholder="Nachricht an JARVIS …" rows="3"></textarea>
+        <div class="send-row"><span id="file-state">KEINE DATEI</span><button id="send-button" type="button">SENDEN ›</button></div>
+      </section>
+
+      <section class="panel quick-actions-panel" id="quick-actions-panel">
+        <div class="panel-head"><span>SCHNELLFUNKTIONEN</span><b>ERWEITERBAR</b></div>
+        <div class="quick-actions" id="quick-actions"></div>
+      </section>
+
+      <section class="panel mobile-install-help" id="ios-help">
+        <div class="panel-head"><span>INSTALLATION // iPHONE</span><b>SAFARI</b></div>
+        <p>Teilen antippen und danach „Zum Home-Bildschirm“ wählen.</p>
+      </section>
+    </aside>
+
+    <footer><span>JARVIS // LIAM</span><span>STUFE 02 · GERÄTEFREIGABE FOLGT</span></footer>
+  </div>
+  <script type="module" src="app.js"></script>
+</body>
+</html>
