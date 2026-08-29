@@ -74,3 +74,12 @@ werden. Dann beantwortet der Bot keine fremden Nutzer.
 - Dashboard-Sessions liegen in der neuen Tabelle `jarvis_dashboard_sessions_v1`. Die bestehende Tabelle `jarvis_chat_memory_v1` wird nicht verändert; JARVIS verwendet für beide Eingänge weiterhin Liams gemeinsames Memory.
 - Die PWA wird unter `/dashboard/` direkt vom vorhandenen Render-Dienst ausgeliefert. Telegram bleibt vollständig erhalten.
 - Ein Ausfall oder fehlender Gerätezugang wird in der Oberfläche rot angezeigt; Zuhören und Antwortsuche bleiben gelb, Bereit und Antworten cyan.
+
+## Sichere Gerätefreigabe – Stufe 03
+
+- Nur Liams numerische Telegram-Kennung wird bei Render als erlaubter Besitzer hinterlegt. Fremde Telegram-Nutzer und nicht freigegebene Browser erhalten keinen Dashboard-Zugang.
+- Ein freizugebendes Gerät öffnet einmalig einen persönlichen Freigabelink. Der geheime Teil steht ausschließlich hinter `#` und wird dadurch nicht an Render oder andere Server übertragen.
+- Das Dashboard prüft den Schlüssel im Browser, speichert ihn nur auf diesem Gerät und entfernt ihn sofort aus der sichtbaren Adresszeile.
+- Ein unvollständiger oder veränderter Schlüssel wird abgewiesen. Das Dashboard bleibt dann gesperrt und zeigt den Fehler rot an.
+- Derselbe geprüfte Freigabelink kann gezielt auf Liams iPhone und dem vorgesehenen Desktop geöffnet werden. Ein bloßer Aufruf der Dashboard-Adresse ohne Gerätefreigabe reicht nicht aus.
+- Telegram, Fish Audio, Gemini und das bestehende gemeinsame Memory bleiben durch diese Stufe unverändert.

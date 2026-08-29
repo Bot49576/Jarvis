@@ -1,5 +1,5 @@
 import { dashboardConfig } from './dashboard.config.js';
-import { DashboardClient, isLocalPreview } from './api-client.js';
+import { DashboardClient, consumePairingTokenFromFragment, isLocalPreview } from './api-client.js';
 import { createJarvisVisualizer } from './visualizer.js';
 
 const app = document.querySelector('#app');
@@ -19,6 +19,7 @@ const fileInput = document.querySelector('#file-input');
 const fileState = document.querySelector('#file-state');
 const installButton = document.querySelector('#install-button');
 let installPrompt = null;
+const pairingResult = consumePairingTokenFromFragment();
 const dashboardClient = new DashboardClient();
 const localPreview = isLocalPreview();
 const visualizer = createJarvisVisualizer({
@@ -126,6 +127,13 @@ async function loadSession(sessionId) {
 }
 
 async function loadDashboardConnection() {
+  if (pairingResult === 'invalid') {
+    messages.replaceChildren();
+    appendMessage('jarvis', 'Der Gerätecode war ungültig. Bitte öffne den vollständigen Freigabelink erneut.');
+    sendButton.disabled = true;
+    visualizer.setState('error', 'Ungültiger Gerätecode');
+    return;
+  }
   if (!dashboardClient.isConfigured) {
     if (!localPreview) {
       messages.replaceChildren();
@@ -142,7 +150,7 @@ async function loadDashboardConnection() {
     sessions.replaceChildren(...payload.sessions.map((session) => new Option(session.title, session.session_id)));
     if (sessions.value) await loadSession(sessions.value);
     sendButton.disabled = false;
-    visualizer.setState('ready', 'Dashboard sicher mit JARVIS verbunden');
+    visualizer.setState('ready', pairingResult === 'paired' ? 'Gerät sicher freigegeben' : 'Dashboard sicher mit JARVIS verbunden');
   } catch (error) {
     sendButton.disabled = true;
     showConnectionError(error);

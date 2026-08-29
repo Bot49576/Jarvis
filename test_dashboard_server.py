@@ -161,6 +161,14 @@ class DashboardHttpTests(AsyncHTTPTestCase):
         self.assertEqual(response.headers["X-Frame-Options"], "DENY")
         self.assertIn("default-src 'self'", response.headers["Content-Security-Policy"])
 
+    def test_pairing_fragment_is_consumed_only_in_the_browser(self):
+        source = (Path(__file__).parent / "dashboard" / "api-client.js").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("window.location.hash", source)
+        self.assertIn("history.replaceState", source)
+        self.assertNotIn("searchParams.get('pair')", source)
+
 
 if __name__ == "__main__":
     unittest.main()
