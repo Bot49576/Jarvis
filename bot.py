@@ -9,6 +9,7 @@ import re
 import time
 from dataclasses import dataclass, field
 from datetime import datetime
+from pathlib import Path
 
 import psycopg
 import requests
@@ -17,6 +18,8 @@ from google.genai import types
 from psycopg.types.json import Jsonb
 from telegram import LinkPreviewOptions, Update
 from telegram.ext import Application, ContextTypes, MessageHandler, filters
+
+from dashboard_server import DashboardContext, DashboardSessionStore, run_dashboard_server
 
 
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
@@ -131,6 +134,7 @@ class ChatMemory:
 class AssistantReply:
     text: str
     sources: list[tuple[str, str]] = field(default_factory=list)
+    voice_enabled: bool = False
 
 
 class MemoryStore:
@@ -857,44 +861,37 @@ def memory_status(state: ChatMemory) -> str:
     )
 
 
-async def process_text(update: Update, user_text: str) -> None:
-    if not update.effective_user:
-        return
-    user_id = update.effective_user.id
-
-    if ALLOWED_TELEGRAM_USER_ID and str(user_id) != ALLOWED_TELEGRAM_USER_ID:
-        if update.message:
-            await update.message.reply_text("Dieser JARVIS ist privat.")
-        return
-
+async def process_user_text(user_id: int, user_text: str) -> AssistantReply:
+    """Gemeinsame JARVIS-Logik für Telegram und das spätere Dashboard."""
     async with get_chat_lock(user_id):
         state = await asyncio.to_thread(memory_store.load, user_id)
         lowered = user_text.casefold().strip()
 
         if lowered == "/memory":
-            await send_answer(update, memory_status(state), False)
-            return
+            return AssistantReply(memory_status(state), voice_enabled=False)
         if lowered == "/reset":
             state.summary = ""
             state.messages = []
             await asyncio.to_thread(memory_store.save, user_id, state)
-            await send_answer(update, "Aktueller Gesprächsverlauf gelöscht. Dauerhafte Fakten bleiben erhalten.", False)
-            return
+            return AssistantReply(
+                "Aktueller Gesprächsverlauf gelöscht. Dauerhafte Fakten bleiben erhalten.",
+                voice_enabled=False,
+            )
         if lowered == "/forgetall":
             state = ChatMemory(voice_enabled=state.voice_enabled)
             await asyncio.to_thread(memory_store.save, user_id, state)
-            await send_answer(update, "Gesprächsverlauf und dauerhafte Fakten wurden gelöscht.", False)
-            return
+            return AssistantReply(
+                "Gesprächsverlauf und dauerhafte Fakten wurden gelöscht.",
+                voice_enabled=False,
+            )
         if lowered in ("/voice on", "sprache an"):
             state.voice_enabled = True
             await asyncio.to_thread(memory_store.save, user_id, state)
-            await send_answer(update, "Sprachausgabe ist eingeschaltet.", False)
-            return
+            return AssistantReply("Sprachausgabe ist eingeschaltet.", voice_enabled=False)
         if lowered in ("/voice off", "sprache aus"):
             state.voice_enabled = False
             await asyncio.to_thread(memory_store.save, user_id, state)
-            await send_answer(update, "Sprachausgabe ist ausgeschaltet.", False)
-            return
+            return AssistantReply("Sprachausgabe ist ausgeschaltet.", voice_enabled=False)
 
         fact = remember_command(user_text)
         if fact:
@@ -902,8 +899,9 @@ async def process_text(update: Update, user_text: str) -> None:
                 state.facts.append(fact)
                 state.facts = state.facts[-MAX_FACTS:]
             await asyncio.to_thread(memory_store.save, user_id, state)
-            await send_answer(update, f"Merke ich mir, Sir: {fact}", state.voice_enabled)
-            return
+            return AssistantReply(
+                f"Merke ich mir, Sir: {fact}", voice_enabled=state.voice_enabled
+            )
 
         forgotten = forget_command(user_text)
         if forgotten:
@@ -926,15 +924,16 @@ async def process_text(update: Update, user_text: str) -> None:
                 f"facts={len(removed)}, turns={removed_turns}, "
                 f"summary_sections={removed_summary_sections}"
             )
-            await send_answer(update, answer, state.voice_enabled)
-            return
+            return AssistantReply(answer, voice_enabled=state.voice_enabled)
 
         research = wants_web_search(user_text)
         deep = wants_deeper_thinking(user_text)
         reply = await asyncio.to_thread(ask_gemini, user_text, state, research, deep)
         if not reply:
-            await send_answer(update, "Gemini konnte gerade keine verwertbare Antwort erzeugen.", False)
-            return
+            return AssistantReply(
+                "Gemini konnte gerade keine verwertbare Antwort erzeugen.",
+                voice_enabled=False,
+            )
 
         state.messages.extend(
             [
@@ -945,7 +944,27 @@ async def process_text(update: Update, user_text: str) -> None:
         state.total_messages += 2
         await asyncio.to_thread(summarize_old_messages, state)
         await asyncio.to_thread(memory_store.save, user_id, state)
-        await send_answer(update, reply.text, state.voice_enabled, reply.sources)
+        reply.voice_enabled = state.voice_enabled
+        return reply
+
+
+async def process_text(update: Update, user_text: str) -> None:
+    if not update.effective_user:
+        return
+    user_id = update.effective_user.id
+
+    if ALLOWED_TELEGRAM_USER_ID and str(user_id) != ALLOWED_TELEGRAM_USER_ID:
+        if update.message:
+            await update.message.reply_text("Dieser JARVIS ist privat.")
+        return
+
+    reply = await process_user_text(user_id, user_text)
+    await send_answer(
+        update,
+        reply.text,
+        reply.voice_enabled,
+        reply.sources,
+    )
 
 
 async def handle_update(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -1003,6 +1022,18 @@ async def handle_update(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         await process_text(update, transcript)
 
 
+def dashboard_status() -> dict:
+    return {
+        "online": True,
+        "dashboard_api": "v1",
+        "memory": "neon" if memory_store.persistent else "ram",
+        "gemini_model": GEMINI_MODEL,
+        "research": "available",
+        "voice_output": "available",
+        "voice_input": "telegram",
+    }
+
+
 def main() -> None:
     required = {
         "TELEGRAM_TOKEN": TELEGRAM_TOKEN,
@@ -1023,8 +1054,19 @@ def main() -> None:
 
     memory_store.initialize()
 
-    application = Application.builder().token(TELEGRAM_TOKEN).build()
+    if not ALLOWED_TELEGRAM_USER_ID:
+        print("Dashboard: ALLOWED_TELEGRAM_USER_ID fehlt; Dashboard-API bleibt gesperrt.")
+        dashboard_owner_id = None
+    else:
+        try:
+            dashboard_owner_id = int(ALLOWED_TELEGRAM_USER_ID)
+        except ValueError as error:
+            raise RuntimeError("ALLOWED_TELEGRAM_USER_ID muss eine Zahl sein.") from error
+
+    application = Application.builder().token(TELEGRAM_TOKEN).updater(None).build()
     application.add_handler(MessageHandler(filters.ALL, handle_update))
+    dashboard_sessions = DashboardSessionStore(DATABASE_URL)
+    dashboard_sessions.initialize()
 
     print("JARVIS ist online.")
     print(f"Gemini: {GEMINI_MODEL}; Standard-Denkstufe: low")
@@ -1032,16 +1074,25 @@ def main() -> None:
     print("Google Search: bedarfsgesteuert")
     print("Fish Audio: aktiv; mit /voice off abschaltbar")
     print("Spracheingabe: Telegram-Audio über Gemini aktiv")
-    print("Telegram: sicherer Webhook aktiv")
-    application.run_webhook(
-        listen="0.0.0.0",
-        port=int(os.getenv("PORT", "10000")),
-        url_path=TELEGRAM_WEBHOOK_PATH,
-        webhook_url=public_webhook_url,
-        secret_token=webhook_secret(TELEGRAM_TOKEN),
-        bootstrap_retries=5,
-        drop_pending_updates=False,
-        max_connections=4,
+    print("Telegram: sicherer Webhook über gemeinsamen Webdienst aktiv")
+    print("Dashboard: Schnittstelle v1; Gerätefreigabe folgt in Schritt 03")
+    dashboard_context = DashboardContext(
+        telegram_application=application,
+        telegram_token=TELEGRAM_TOKEN,
+        telegram_webhook_secret=webhook_secret(TELEGRAM_TOKEN),
+        owner_id=dashboard_owner_id,
+        allowed_origin=WEBHOOK_BASE_URL.rstrip("/"),
+        session_store=dashboard_sessions,
+        process_text=process_user_text,
+        status=dashboard_status,
+    )
+    asyncio.run(
+        run_dashboard_server(
+            context=dashboard_context,
+            dashboard_path=Path(__file__).resolve().parent / "dashboard",
+            webhook_url=public_webhook_url,
+            port=int(os.getenv("PORT", "10000")),
+        )
     )
 
 
