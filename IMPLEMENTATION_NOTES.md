@@ -93,3 +93,12 @@ werden. Dann beantwortet der Bot keine fremden Nutzer.
 - Seitenwechsel über die untere Navigation und Wischgesten funktionieren. Die lokale Browser-Prüfung aller drei Seiten verlief ohne JavaScript-Fehler.
 - Die sichtbaren Nachrichten und Systemwerte sind in diesem Schritt noch reine Gestaltungsbeispiele. Ring, Sprache, Chat, Uploads und Live-Systemdaten werden erst in den ausdrücklich freigegebenen Schritten 03 bis 05 angeschlossen.
 - Dieser Stand ist nur lokal gespeichert und noch nicht zu GitHub oder Render veröffentlicht.
+
+## Aktivierte Startseite – Schritt 03
+
+- Ein Tippen auf den JARVIS-Ring startet beziehungsweise beendet die echte Mikrofonerfassung des Geräts. Echo-Unterdrückung, Rauschminderung und automatische Pegelanpassung werden angefordert.
+- Die neun Balken in der Ringmitte folgen beim Zuhören dem tatsächlich gemessenen Mikrofonpegel. Bereit, Zuhören, Arbeiten, Antworten, Fehler und Offline besitzen klar getrennte Farben und Bewegungen.
+- Beim Verlassen der Seite werden Mikrofonspur und Audioverarbeitung beendet, damit das Mikrofon nicht unbeabsichtigt weiterläuft.
+- Der Plus-Knopf öffnet die Dateiauswahl, merkt die gewählten Dateien und übergibt sie sichtbar an die Chatseite. Das tatsächliche Senden und Verarbeiten der Auswahl gehört weiterhin zu Schritt 04.
+- Die mobile Ansicht wurde mit 390 × 844 Pixeln geprüft: kein Überlauf, alle Bedienelemente sichtbar und keine Browserfehler.
+- Mikrofon- und Dateiberechtigungen werden nicht umgangen. Der echte Berechtigungstest auf dem iPhone erfolgt nach Veröffentlichung im vollständigen Geräte-Endtest.

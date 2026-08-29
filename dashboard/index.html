@@ -12,7 +12,7 @@
   <title>JARVIS · Liam</title>
 </head>
 <body>
-  <main class="app" id="app" data-page="0" data-state="working">
+  <main class="app" id="app" data-page="0" data-state="ready">
     <header class="topbar">
       <div class="brand"><span class="brand-gem" aria-hidden="true"></span><div><strong>JΛRVIS</strong><small>LIAM'S PRIVATE INTERFACE</small></div></div>
       <div class="live"><i></i><span id="top-status">BEREIT</span></div>
@@ -22,13 +22,13 @@
     <div class="viewport" id="viewport">
       <div class="track" id="track">
         <section class="screen home" aria-label="JARVIS Hauptseite">
-          <button class="core mode-working" id="voice-core" type="button" aria-label="JARVIS Sprachsteuerung">
+          <button class="core" id="voice-core" type="button" aria-label="Spracheingabe starten" aria-pressed="false">
             <span class="orbit orbit-a"></span><span class="orbit orbit-b"></span><span class="orbit orbit-c"></span><span class="orbit orbit-d"></span>
             <span class="ticks ticks-a"></span><span class="ticks ticks-b"></span><span class="radar"></span><span class="crosshair"></span>
             <span class="center"><b>JΛRVIS</b><span class="wave"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span></span>
           </button>
-          <div class="voice-copy working" id="voice-state"><strong>◉ &nbsp; ICH PRÜFE DAS …</strong></div>
-          <div class="home-upload-wrap"><input id="home-file-input" type="file" multiple hidden><button class="home-upload" id="home-attach-button" type="button" aria-label="Datei an JARVIS senden">＋</button><span>DATEI SENDEN</span></div>
+          <div class="voice-copy" id="voice-state" aria-live="polite"><strong>◉ &nbsp; BEREIT</strong></div>
+          <div class="home-upload-wrap"><input id="home-file-input" type="file" multiple hidden><button class="home-upload" id="home-attach-button" type="button" aria-label="Datei für JARVIS auswählen">＋</button><span id="home-file-state">DATEI SENDEN</span></div>
         </section>
 
         <section class="screen chat" aria-label="JARVIS Chatseite">

@@ -229,6 +229,20 @@ class DashboardHttpTests(AsyncHTTPTestCase):
         self.assertIn("LIAM'S PRIVATE INTERFACE", source)
         self.assertNotIn("Lokale Bedienungsdemo", source)
 
+    def test_home_page_has_real_microphone_and_file_selection_logic(self):
+        app_source = (Path(__file__).parent / "dashboard" / "app.js").read_text(
+            encoding="utf-8"
+        )
+        visualizer_source = (
+            Path(__file__).parent / "dashboard" / "visualizer.js"
+        ).read_text(encoding="utf-8")
+        self.assertIn("navigator.mediaDevices.getUserMedia", app_source)
+        self.assertIn("createMediaStreamSource", app_source)
+        self.assertIn("homeFileInput.addEventListener('change'", app_source)
+        self.assertIn("showPage(1)", app_source)
+        self.assertIn("setVoiceLevel", visualizer_source)
+        self.assertNotIn("SPRACHDEMO", visualizer_source)
+
     def test_pairing_fragment_is_consumed_only_in_the_browser(self):
         source = (Path(__file__).parent / "dashboard" / "api-client.js").read_text(
             encoding="utf-8"
