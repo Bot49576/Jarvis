@@ -19,6 +19,7 @@ MAX_DASHBOARD_SESSIONS = 20
 MAX_SESSION_MESSAGES = 100
 MAX_SESSION_TITLE_CHARS = 60
 MAX_REQUEST_BYTES = 64 * 1024
+DASHBOARD_COOKIE_NAME = "__Host-liam-jarvis-device"
 
 
 def dashboard_access_token(telegram_token: str, owner_id: int) -> str:
@@ -247,7 +248,10 @@ class JsonHandler(tornado.web.RequestHandler):
             return False
         expected = dashboard_access_token(self.context.telegram_token, self.context.owner_id)
         supplied = self.request.headers.get("Authorization", "")
-        if not hmac.compare_digest(supplied, f"Bearer {expected}"):
+        cookie_token = self.get_cookie(DASHBOARD_COOKIE_NAME, "")
+        bearer_ok = hmac.compare_digest(supplied, f"Bearer {expected}")
+        cookie_ok = hmac.compare_digest(cookie_token, expected)
+        if not bearer_ok and not cookie_ok:
             self.write_json({"error": "Gerät nicht freigegeben."}, 401)
             return False
         return True
@@ -267,6 +271,36 @@ class JsonHandler(tornado.web.RequestHandler):
 class HealthHandler(JsonHandler):
     async def get(self) -> None:
         self.write_json({"online": True, "service": "liam-jarvis"})
+
+
+class DashboardPairHandler(JsonHandler):
+    async def post(self) -> None:
+        if self.context.owner_id is None:
+            self.write_json({"error": "Dashboard ist noch nicht freigegeben."}, 503)
+            return
+        origin = self.request.headers.get("Origin", "").rstrip("/")
+        if origin and origin != self.context.allowed_origin.rstrip("/"):
+            self.write_json({"error": "Unzulässiger Ursprung."}, 403)
+            return
+        try:
+            supplied = str(self.body_json().get("token", "")).strip()
+        except ValueError as error:
+            self.write_json({"error": str(error)}, 400)
+            return
+        expected = dashboard_access_token(self.context.telegram_token, self.context.owner_id)
+        if not hmac.compare_digest(supplied, expected):
+            self.write_json({"error": "Gerätecode ungültig."}, 401)
+            return
+        self.set_cookie(
+            DASHBOARD_COOKIE_NAME,
+            expected,
+            path="/",
+            expires_days=365,
+            secure=True,
+            httponly=True,
+            samesite="Strict",
+        )
+        self.write_json({"paired": True})
 
 
 class TelegramWebhookHandler(JsonHandler):
@@ -404,6 +438,7 @@ def make_web_application(context: DashboardContext, dashboard_path: Path) -> tor
         [
             (r"/healthz", HealthHandler, {"context": context}),
             (r"/telegram/webhook", TelegramWebhookHandler, {"context": context}),
+            (r"/api/dashboard/pair", DashboardPairHandler, {"context": context}),
             (r"/api/dashboard/status", DashboardStatusHandler, {"context": context}),
             (r"/api/dashboard/sessions", DashboardSessionsHandler, {"context": context}),
             (r"/api/dashboard/sessions/([0-9a-fA-F-]+)", DashboardSessionHandler, {"context": context}),

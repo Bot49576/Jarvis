@@ -9,6 +9,7 @@ from unittest.mock import patch
 from tornado.testing import AsyncHTTPTestCase
 
 from dashboard_server import (
+    DASHBOARD_COOKIE_NAME,
     DashboardContext,
     DashboardSessionStore,
     dashboard_access_token,
@@ -110,6 +111,21 @@ class DashboardHttpTests(AsyncHTTPTestCase):
             headers["Origin"] = origin
         return headers
 
+    def pair_cookie(self):
+        response = self.fetch(
+            "/api/dashboard/pair",
+            method="POST",
+            headers={
+                "Content-Type": "application/json",
+                "Origin": "https://jarvis.example",
+            },
+            body=json.dumps(
+                {"token": dashboard_access_token(self.telegram_token, self.owner_id)}
+            ),
+        )
+        self.assertEqual(response.code, 200)
+        return response.headers["Set-Cookie"]
+
     def decode(self, response):
         return json.loads(response.body.decode("utf-8"))
 
@@ -128,6 +144,45 @@ class DashboardHttpTests(AsyncHTTPTestCase):
             headers=self.auth_headers("https://foreign.example"),
         )
         self.assertEqual(response.code, 403)
+
+    def test_pairing_creates_durable_secure_cookie(self):
+        cookie = self.pair_cookie()
+        self.assertIn(f"{DASHBOARD_COOKIE_NAME}=", cookie)
+        self.assertIn("HttpOnly", cookie)
+        self.assertIn("Secure", cookie)
+        self.assertIn("SameSite=Strict", cookie)
+        self.assertIn("Path=/", cookie)
+
+        cookie_value = cookie.split(";", 1)[0]
+        status = self.fetch(
+            "/api/dashboard/status",
+            headers={"Cookie": cookie_value},
+        )
+        self.assertEqual(status.code, 200)
+        self.assertTrue(self.decode(status)["online"])
+
+    def test_pairing_rejects_wrong_token_and_foreign_origin(self):
+        wrong = self.fetch(
+            "/api/dashboard/pair",
+            method="POST",
+            headers={"Content-Type": "application/json"},
+            body=json.dumps({"token": "0" * 64}),
+        )
+        self.assertEqual(wrong.code, 401)
+        self.assertNotIn("Set-Cookie", wrong.headers)
+
+        foreign = self.fetch(
+            "/api/dashboard/pair",
+            method="POST",
+            headers={
+                "Content-Type": "application/json",
+                "Origin": "https://foreign.example",
+            },
+            body=json.dumps(
+                {"token": dashboard_access_token(self.telegram_token, self.owner_id)}
+            ),
+        )
+        self.assertEqual(foreign.code, 403)
 
     def test_sessions_and_chat_use_the_protected_interface(self):
         sessions_response = self.fetch(
@@ -167,6 +222,9 @@ class DashboardHttpTests(AsyncHTTPTestCase):
         )
         self.assertIn("window.location.hash", source)
         self.assertIn("history.replaceState", source)
+        self.assertIn("/api/dashboard/pair", source)
+        self.assertIn("credentials: 'same-origin'", source)
+        self.assertNotIn("localStorage.setItem", source)
         self.assertNotIn("searchParams.get('pair')", source)
 
 

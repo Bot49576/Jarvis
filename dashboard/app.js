@@ -19,7 +19,7 @@ const fileInput = document.querySelector('#file-input');
 const fileState = document.querySelector('#file-state');
 const installButton = document.querySelector('#install-button');
 let installPrompt = null;
-const pairingResult = consumePairingTokenFromFragment();
+const pairingResultPromise = Promise.resolve(consumePairingTokenFromFragment());
 const dashboardClient = new DashboardClient();
 const localPreview = isLocalPreview();
 const visualizer = createJarvisVisualizer({
@@ -127,6 +127,7 @@ async function loadSession(sessionId) {
 }
 
 async function loadDashboardConnection() {
+  const pairingResult = await pairingResultPromise;
   if (pairingResult === 'invalid') {
     messages.replaceChildren();
     appendMessage('jarvis', 'Der Gerätecode war ungültig. Bitte öffne den vollständigen Freigabelink erneut.');

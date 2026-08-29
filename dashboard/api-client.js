@@ -9,8 +9,16 @@ export function consumePairingTokenFromFragment() {
   window.history.replaceState({}, '', `${window.location.pathname}${window.location.search}`);
   if (!/^[a-f0-9]{64}$/i.test(token)) return 'invalid';
 
-  window.localStorage.setItem(TOKEN_STORAGE_KEY, token);
-  return 'paired';
+  return fetch('/api/dashboard/pair', {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ token }),
+  }).then(async (response) => {
+    if (!response.ok) return 'invalid';
+    window.localStorage.removeItem(TOKEN_STORAGE_KEY);
+    return 'paired';
+  }).catch(() => 'invalid');
 }
 
 export class DashboardClient {
@@ -23,15 +31,18 @@ export class DashboardClient {
   }
 
   get isConfigured() {
-    return Boolean(this.token);
+    // HttpOnly-Geräte-Cookies sind für JavaScript absichtlich unsichtbar.
+    // Auf der echten HTTPS-Seite wird die Verbindung direkt beim Server geprüft.
+    return Boolean(this.token) || window.location.protocol === 'https:';
   }
 
   async request(path, options = {}) {
-    if (!this.token) throw new Error('Dieses Gerät ist noch nicht freigegeben.');
+    const authorization = this.token ? { Authorization: `Bearer ${this.token}` } : {};
     const response = await fetch(`${this.baseUrl}${path}`, {
       ...options,
+      credentials: 'same-origin',
       headers: {
-        Authorization: `Bearer ${this.token}`,
+        ...authorization,
         'Content-Type': 'application/json',
         ...(options.headers || {}),
       },

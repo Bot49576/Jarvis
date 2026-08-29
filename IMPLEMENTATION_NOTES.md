@@ -79,7 +79,9 @@ werden. Dann beantwortet der Bot keine fremden Nutzer.
 
 - Nur Liams numerische Telegram-Kennung wird bei Render als erlaubter Besitzer hinterlegt. Fremde Telegram-Nutzer und nicht freigegebene Browser erhalten keinen Dashboard-Zugang.
 - Ein freizugebendes Gerät öffnet einmalig einen persönlichen Freigabelink. Der geheime Teil steht ausschließlich hinter `#` und wird dadurch nicht an Render oder andere Server übertragen.
-- Das Dashboard prüft den Schlüssel im Browser, speichert ihn nur auf diesem Gerät und entfernt ihn sofort aus der sichtbaren Adresszeile.
+- Das Dashboard entfernt den geheimen Teil sofort aus der sichtbaren Adresszeile und tauscht ihn über die eigene Render-Adresse gegen ein geschütztes Geräte-Cookie ein.
+- Das Cookie ist ein Jahr gültig, nur über HTTPS übertragbar und für JavaScript unsichtbar. Damit wird es beim Hinzufügen zum iPhone-Startbildschirm in die PWA übernommen; normaler Browser-Speicher wird von iOS dagegen nicht kopiert.
+- Bereits freigegebene Desktop-Browser mit dem älteren lokalen Zugang bleiben während der Umstellung kompatibel.
 - Ein unvollständiger oder veränderter Schlüssel wird abgewiesen. Das Dashboard bleibt dann gesperrt und zeigt den Fehler rot an.
 - Derselbe geprüfte Freigabelink kann gezielt auf Liams iPhone und dem vorgesehenen Desktop geöffnet werden. Ein bloßer Aufruf der Dashboard-Adresse ohne Gerätefreigabe reicht nicht aus.
 - Telegram, Fish Audio, Gemini und das bestehende gemeinsame Memory bleiben durch diese Stufe unverändert.
