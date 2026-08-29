@@ -32,7 +32,7 @@
         </section>
 
         <section class="screen chat" aria-label="JARVIS Chatseite">
-          <div class="page-title"><div><small>SEITE 02</small><h1>UNTERHALTUNG</h1></div><button id="new-session" type="button">＋ NEU</button></div>
+          <div class="page-title"><div><small>SEITE 02</small><h1>UNTERHALTUNG</h1></div><button id="new-session" type="button" title="Neue Chatansicht starten; Langzeit-Memory bleibt aktiv">＋ NEU</button></div>
           <select id="sessions" hidden aria-label="Unterhaltung"><option value="">Aktive Unterhaltung</option></select>
           <div class="messages" id="messages" aria-live="polite">
             <article class="bubble user"><small>LIAM · 14:20</small><p>Welche Filme laufen heute Abend im Kino?</p></article>
@@ -43,7 +43,7 @@
             <input id="file-input" type="file" accept="image/*,.pdf,.txt,.md,.csv,.json" multiple hidden>
             <button class="attach" id="attach-button" type="button" aria-label="Datei anhängen">＋</button>
             <textarea id="message-input" rows="1" placeholder="Nachricht an JARVIS …"></textarea>
-            <button class="mic" id="mic-button" type="button" aria-label="Sprache aufnehmen">●</button>
+            <button class="mic" id="mic-button" type="button" aria-label="Zum Sprechen gedrückt halten" aria-pressed="false"><svg aria-hidden="true" viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3"></rect><path d="M6.5 11.5a5.5 5.5 0 0 0 11 0M12 17v4M9 21h6"></path></svg></button>
             <button class="send" id="send-button" type="submit" aria-label="Senden">›</button>
           </form>
           <div class="composer-hint"><span id="file-state">TEXT · AUDIO · DATEI</span><span id="chat-status">MEMORY AKTIV</span></div>

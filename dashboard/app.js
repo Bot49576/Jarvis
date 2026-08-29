@@ -55,6 +55,8 @@ let recordedChunks = [];
 let recordingTimer = null;
 let pushToTalkHeld = false;
 let pushToTalkPointerId = null;
+let pushToTalkControl = null;
+let recordingSurface = null;
 let activeAudio = null;
 let outputAudioContext = null;
 let outputFrame = null;
@@ -340,14 +342,15 @@ async function releaseMicrophone(nextState = 'ready') {
   voiceCore.setAttribute('aria-pressed', 'false');
   voiceCore.setAttribute('aria-label', 'Zum Sprechen gedrückt halten');
   micButton.classList.remove('recording');
-  micButton.setAttribute('aria-label', 'Sprache aufnehmen');
+  micButton.setAttribute('aria-pressed', 'false');
+  micButton.setAttribute('aria-label', 'Zum Sprechen gedrückt halten');
   visualizer.setState(nextState);
 }
 
-async function transcribeAndSend(blob, mimeType) {
+async function transcribeAndSend(blob, mimeType, surface) {
   if (!blob.size) throw new Error('Die Sprachaufnahme war leer.');
-  showPage(1);
-  visualizer.setState('working', '◉  SPRACHE WIRD VERSTANDEN …');
+  if (surface !== 'home') showPage(1);
+  visualizer.setState('working');
   chatStatus.textContent = 'SPRACHE WIRD VERARBEITET';
   const extension = mimeType.includes('mp4') ? 'm4a' : 'webm';
   const transcript = await dashboardClient.transcribe(blob, `aufnahme.${extension}`);
@@ -357,7 +360,9 @@ async function transcribeAndSend(blob, mimeType) {
 
 async function stopRecording(submit = true) {
   const recorder = mediaRecorder;
+  const surface = recordingSurface || 'chat';
   mediaRecorder = null;
+  recordingSurface = null;
   if (!recorder || recorder.state === 'inactive') {
     await releaseMicrophone();
     return;
@@ -371,7 +376,7 @@ async function stopRecording(submit = true) {
   await releaseMicrophone(submit ? 'working' : 'ready');
   if (submit) {
     try {
-      await transcribeAndSend(blob, mimeType);
+      await transcribeAndSend(blob, mimeType, surface);
     } catch (error) {
       showError(error);
       setBusy(false);
@@ -379,7 +384,7 @@ async function stopRecording(submit = true) {
   }
 }
 
-async function startRecording({ pushToTalk = false } = {}) {
+async function startRecording({ pushToTalk = false, source = 'chat' } = {}) {
   if (microphoneStarting || mediaRecorder) return;
   if (!connected) {
     showError(new Error('Dieses Gerät ist noch nicht mit JARVIS verbunden.'));
@@ -405,19 +410,25 @@ async function startRecording({ pushToTalk = false } = {}) {
     inputAudioContext.createMediaStreamSource(microphoneStream).connect(inputAnalyser);
     const mimeType = recordingMimeType();
     mediaRecorder = new MediaRecorder(microphoneStream, mimeType ? { mimeType } : undefined);
+    recordingSurface = source;
     recordedChunks = [];
     mediaRecorder.addEventListener('dataavailable', (event) => {
       if (event.data.size) recordedChunks.push(event.data);
     });
     mediaRecorder.start(250);
-    voiceCore.setAttribute('aria-pressed', 'true');
-    voiceCore.setAttribute('aria-label', pushToTalk ? 'Zum Senden loslassen' : 'Spracheingabe senden');
-    micButton.classList.add('recording');
-    micButton.setAttribute('aria-label', 'Spracheingabe senden');
+    const activeControl = source === 'home' ? voiceCore : micButton;
+    activeControl.setAttribute('aria-pressed', 'true');
+    activeControl.setAttribute('aria-label', 'Zum Senden loslassen');
+    if (source === 'chat') micButton.classList.add('recording');
     visualizer.setState('listening');
-    chatStatus.textContent = pushToTalk ? 'HÖRT ZU · ZUM SENDEN LOSLASSEN' : 'HÖRT ZU · ERNEUT TIPPEN ZUM SENDEN';
+    chatStatus.textContent = 'HÖRT ZU · ZUM SENDEN LOSLASSEN';
     sampleMicrophone();
-    recordingTimer = setTimeout(() => stopRecording(true), 120_000);
+    recordingTimer = setTimeout(() => {
+      pushToTalkHeld = false;
+      pushToTalkPointerId = null;
+      pushToTalkControl = null;
+      stopRecording(true);
+    }, 120_000);
   } catch {
     await releaseMicrophone('error');
   } finally {
@@ -425,48 +436,53 @@ async function startRecording({ pushToTalk = false } = {}) {
   }
 }
 
-async function toggleRecording() {
-  if (microphoneStarting) return;
-  if (mediaRecorder) await stopRecording(true);
-  else await startRecording();
-}
-
-async function beginPushToTalk(event) {
-  if (!event.isPrimary || event.button !== 0 || voiceCore.disabled || pushToTalkHeld) return;
+async function beginPushToTalk(event, source, control) {
+  if (!event.isPrimary || event.button !== 0 || control.disabled || pushToTalkHeld) return;
   event.preventDefault();
+  event.stopPropagation?.();
   pushToTalkHeld = true;
   pushToTalkPointerId = event.pointerId;
-  if (event.pointerId >= 0) voiceCore.setPointerCapture?.(event.pointerId);
-  await startRecording({ pushToTalk: true });
+  pushToTalkControl = control;
+  if (event.pointerId >= 0) control.setPointerCapture?.(event.pointerId);
+  await startRecording({ pushToTalk: true, source });
 }
 
-async function finishPushToTalk(event, submit = true) {
-  if (!pushToTalkHeld || (event.pointerId !== undefined && event.pointerId !== pushToTalkPointerId)) return;
+async function finishPushToTalk(event, control, submit = true) {
+  if (!pushToTalkHeld || pushToTalkControl !== control
+      || (event.pointerId !== undefined && event.pointerId !== pushToTalkPointerId)) return;
   event.preventDefault();
+  event.stopPropagation?.();
   pushToTalkHeld = false;
   pushToTalkPointerId = null;
+  pushToTalkControl = null;
   if (mediaRecorder) await stopRecording(submit);
 }
 
-voiceCore.addEventListener('pointerdown', beginPushToTalk);
-voiceCore.addEventListener('pointerup', (event) => finishPushToTalk(event, true));
-voiceCore.addEventListener('pointercancel', (event) => finishPushToTalk(event, false));
-voiceCore.addEventListener('contextmenu', (event) => event.preventDefault());
-voiceCore.addEventListener('keydown', (event) => {
-  if ((event.key === ' ' || event.key === 'Enter') && !event.repeat) beginPushToTalk({
-    isPrimary: true,
-    button: 0,
-    pointerId: -1,
-    preventDefault: () => event.preventDefault(),
+function bindPushToTalk(control, source) {
+  control.addEventListener('pointerdown', (event) => beginPushToTalk(event, source, control));
+  control.addEventListener('pointerup', (event) => finishPushToTalk(event, control, true));
+  control.addEventListener('pointercancel', (event) => finishPushToTalk(event, control, false));
+  control.addEventListener('contextmenu', (event) => event.preventDefault());
+  control.addEventListener('keydown', (event) => {
+    if ((event.key === ' ' || event.key === 'Enter') && !event.repeat) beginPushToTalk({
+      isPrimary: true,
+      button: 0,
+      pointerId: -1,
+      preventDefault: () => event.preventDefault(),
+      stopPropagation: () => event.stopPropagation(),
+    }, source, control);
   });
-});
-voiceCore.addEventListener('keyup', (event) => {
-  if (event.key === ' ' || event.key === 'Enter') finishPushToTalk({
-    pointerId: -1,
-    preventDefault: () => event.preventDefault(),
-  }, true);
-});
-micButton.addEventListener('click', toggleRecording);
+  control.addEventListener('keyup', (event) => {
+    if (event.key === ' ' || event.key === 'Enter') finishPushToTalk({
+      pointerId: -1,
+      preventDefault: () => event.preventDefault(),
+      stopPropagation: () => event.stopPropagation(),
+    }, control, true);
+  });
+}
+
+bindPushToTalk(voiceCore, 'home');
+bindPushToTalk(micButton, 'chat');
 
 function stopOutputAudio() {
   if (outputFrame !== null) cancelAnimationFrame(outputFrame);

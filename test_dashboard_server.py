@@ -389,8 +389,8 @@ class DashboardHttpTests(AsyncHTTPTestCase):
         ).read_text(encoding="utf-8")
         self.assertIn("navigator.mediaDevices.getUserMedia", app_source)
         self.assertIn("createMediaStreamSource", app_source)
-        self.assertIn("voiceCore.addEventListener('pointerdown', beginPushToTalk)", app_source)
-        self.assertIn("voiceCore.addEventListener('pointerup'", app_source)
+        self.assertIn("bindPushToTalk(voiceCore, 'home')", app_source)
+        self.assertIn("if (surface !== 'home') showPage(1)", app_source)
         self.assertIn("HÖRT ZU · ZUM SENDEN LOSLASSEN", app_source)
         self.assertNotIn("voiceCore.addEventListener('click', toggleRecording)", app_source)
         self.assertIn("homeFileInput.addEventListener('change'", app_source)
@@ -406,12 +406,29 @@ class DashboardHttpTests(AsyncHTTPTestCase):
             Path(__file__).parent / "dashboard" / "api-client.js"
         ).read_text(encoding="utf-8")
         self.assertIn("new MediaRecorder", app_source)
+        self.assertIn("bindPushToTalk(micButton, 'chat')", app_source)
+        self.assertNotIn("micButton.addEventListener('click', toggleRecording)", app_source)
         self.assertIn("dashboardClient.transcribe", app_source)
         self.assertIn("dashboardClient.chat", app_source)
         self.assertIn("dashboardClient.speech", app_source)
         self.assertIn("/api/dashboard/transcribe", client_source)
         self.assertIn("/api/dashboard/speech", client_source)
         self.assertIn("new FormData()", client_source)
+
+    def test_dashboard_state_copy_and_mobile_readability_match_the_approved_flow(self):
+        dashboard_path = Path(__file__).parent / "dashboard"
+        visualizer_source = (dashboard_path / "visualizer.js").read_text(encoding="utf-8")
+        html_source = (dashboard_path / "index.html").read_text(encoding="utf-8")
+        css_source = (dashboard_path / "approved.css").read_text(encoding="utf-8")
+        service_worker = (dashboard_path / "sw.js").read_text(encoding="utf-8")
+
+        self.assertIn("working: { voice: '◉  ARBEITET …', top: 'ARBEITET' }", visualizer_source)
+        self.assertIn("speaking: { voice: '◉  SPRICHT', top: 'SPRICHT' }", visualizer_source)
+        self.assertIn('id="mic-button"', html_source)
+        self.assertIn('<svg aria-hidden="true" viewBox="0 0 24 24">', html_source)
+        self.assertIn(".pager button", css_source)
+        self.assertIn("font-size: 10px", css_source)
+        self.assertIn("liam-jarvis-pwa-v13", service_worker)
 
     def test_system_page_renders_and_refreshes_live_status(self):
         app_source = (Path(__file__).parent / "dashboard" / "app.js").read_text(

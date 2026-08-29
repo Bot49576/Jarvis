@@ -1,8 +1,8 @@
 const STATE_COPY = {
   ready: { voice: '◉  BEREIT', top: 'BEREIT' },
   listening: { voice: '◉  ICH HÖRE ZU …', top: 'HÖRT ZU' },
-  working: { voice: '◉  ICH PRÜFE DAS …', top: 'PRÜFT' },
-  speaking: { voice: '◉  JARVIS ANTWORTET …', top: 'ANTWORTET' },
+  working: { voice: '◉  ARBEITET …', top: 'ARBEITET' },
+  speaking: { voice: '◉  SPRICHT', top: 'SPRICHT' },
   error: { voice: '◉  FEHLER', top: 'FEHLER' },
   offline: { voice: '◉  JARVIS IST OFFLINE', top: 'OFFLINE' },
 };
