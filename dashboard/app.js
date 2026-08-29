@@ -53,6 +53,8 @@ let microphoneStarting = false;
 let mediaRecorder = null;
 let recordedChunks = [];
 let recordingTimer = null;
+let pushToTalkHeld = false;
+let pushToTalkPointerId = null;
 let activeAudio = null;
 let outputAudioContext = null;
 let outputFrame = null;
@@ -336,7 +338,7 @@ async function releaseMicrophone(nextState = 'ready') {
   clearTimeout(recordingTimer);
   recordingTimer = null;
   voiceCore.setAttribute('aria-pressed', 'false');
-  voiceCore.setAttribute('aria-label', 'Spracheingabe starten');
+  voiceCore.setAttribute('aria-label', 'Zum Sprechen gedrückt halten');
   micButton.classList.remove('recording');
   micButton.setAttribute('aria-label', 'Sprache aufnehmen');
   visualizer.setState(nextState);
@@ -377,7 +379,7 @@ async function stopRecording(submit = true) {
   }
 }
 
-async function startRecording() {
+async function startRecording({ pushToTalk = false } = {}) {
   if (microphoneStarting || mediaRecorder) return;
   if (!connected) {
     showError(new Error('Dieses Gerät ist noch nicht mit JARVIS verbunden.'));
@@ -392,6 +394,10 @@ async function startRecording() {
     microphoneStream = await navigator.mediaDevices.getUserMedia({
       audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
     });
+    if (pushToTalk && !pushToTalkHeld) {
+      await releaseMicrophone();
+      return;
+    }
     inputAudioContext = createAudioContext();
     inputAnalyser = inputAudioContext.createAnalyser();
     inputAnalyser.fftSize = 512;
@@ -405,11 +411,11 @@ async function startRecording() {
     });
     mediaRecorder.start(250);
     voiceCore.setAttribute('aria-pressed', 'true');
-    voiceCore.setAttribute('aria-label', 'Spracheingabe senden');
+    voiceCore.setAttribute('aria-label', pushToTalk ? 'Zum Senden loslassen' : 'Spracheingabe senden');
     micButton.classList.add('recording');
     micButton.setAttribute('aria-label', 'Spracheingabe senden');
     visualizer.setState('listening');
-    chatStatus.textContent = 'HÖRT ZU · ERNEUT TIPPEN ZUM SENDEN';
+    chatStatus.textContent = pushToTalk ? 'HÖRT ZU · ZUM SENDEN LOSLASSEN' : 'HÖRT ZU · ERNEUT TIPPEN ZUM SENDEN';
     sampleMicrophone();
     recordingTimer = setTimeout(() => stopRecording(true), 120_000);
   } catch {
@@ -425,7 +431,41 @@ async function toggleRecording() {
   else await startRecording();
 }
 
-voiceCore.addEventListener('click', toggleRecording);
+async function beginPushToTalk(event) {
+  if (!event.isPrimary || event.button !== 0 || voiceCore.disabled || pushToTalkHeld) return;
+  event.preventDefault();
+  pushToTalkHeld = true;
+  pushToTalkPointerId = event.pointerId;
+  if (event.pointerId >= 0) voiceCore.setPointerCapture?.(event.pointerId);
+  await startRecording({ pushToTalk: true });
+}
+
+async function finishPushToTalk(event, submit = true) {
+  if (!pushToTalkHeld || (event.pointerId !== undefined && event.pointerId !== pushToTalkPointerId)) return;
+  event.preventDefault();
+  pushToTalkHeld = false;
+  pushToTalkPointerId = null;
+  if (mediaRecorder) await stopRecording(submit);
+}
+
+voiceCore.addEventListener('pointerdown', beginPushToTalk);
+voiceCore.addEventListener('pointerup', (event) => finishPushToTalk(event, true));
+voiceCore.addEventListener('pointercancel', (event) => finishPushToTalk(event, false));
+voiceCore.addEventListener('contextmenu', (event) => event.preventDefault());
+voiceCore.addEventListener('keydown', (event) => {
+  if ((event.key === ' ' || event.key === 'Enter') && !event.repeat) beginPushToTalk({
+    isPrimary: true,
+    button: 0,
+    pointerId: -1,
+    preventDefault: () => event.preventDefault(),
+  });
+});
+voiceCore.addEventListener('keyup', (event) => {
+  if (event.key === ' ' || event.key === 'Enter') finishPushToTalk({
+    pointerId: -1,
+    preventDefault: () => event.preventDefault(),
+  }, true);
+});
 micButton.addEventListener('click', toggleRecording);
 
 function stopOutputAudio() {
