@@ -1,5 +1,18 @@
 const TOKEN_STORAGE_KEY = 'liam-jarvis-dashboard-token';
 
+export function consumePairingTokenFromFragment() {
+  const fragment = new URLSearchParams(window.location.hash.replace(/^#/, ''));
+  const token = (fragment.get('pair') || '').trim();
+  if (!token) return 'none';
+
+  // Das Fragment wird nie an Render gesendet und verschwindet sofort aus der Adresszeile.
+  window.history.replaceState({}, '', `${window.location.pathname}${window.location.search}`);
+  if (!/^[a-f0-9]{64}$/i.test(token)) return 'invalid';
+
+  window.localStorage.setItem(TOKEN_STORAGE_KEY, token);
+  return 'paired';
+}
+
 export class DashboardClient {
   constructor(baseUrl = '') {
     this.baseUrl = baseUrl.replace(/\/$/, '');
