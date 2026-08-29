@@ -130,3 +130,11 @@ werden. Dann beantwortet der Bot keine fremden Nutzer.
 - Die Zwischenmeldung ist nur während der Bearbeitung sichtbar und wird durch die echte Antwort ersetzt. Dadurch bleibt der dauerhaft gespeicherte Chat frei von künstlichen Zwischenmeldungen.
 - Vierzehn gezielte Klassifizierungsfälle sowie der echte PWA-Ablauf mit verzögerter Testantwort wurden lokal geprüft. Im iPhone-Format erschien die Zwischenmeldung sofort, verschwand bei der Antwort wieder und blieb bei einer einfachen Kontrollfrage vollständig aus.
 - Diese Funktion gilt für das neue PWA-Dashboard. Telegram bleibt unverändert. Der Stand ist weiterhin nicht zu GitHub oder Render veröffentlicht.
+
+## Lokale Gesamtprüfung – Schritt 07
+
+- Der komplette lokale PWA-Weg wurde im iPhone- und Desktop-Format über einen sauberen JARVIS-Testprozess geprüft. Gerätefreigabe, Text, Sofortmeldung, Datei-Upload, Systemwerte, geschützte Audio-Endpunkte und Browserdarstellung waren fehlerfrei.
+- Der Testdienst wurde vollständig beendet und als offline bestätigt. Nach dem Start eines neuen Prozesses blieb die Gerätefreigabe ohne erneuten Link erhalten; der geheime Freigabeteil war weiterhin aus der Adresse entfernt.
+- 50 automatisierte Haupttests und 14 Kurzrückmeldungs-Tests sind bestanden. Während der Browserprüfung traten keine Warnungen oder JavaScript-Fehler auf.
+- Die Prüfung nutzte nur künstliche Testdaten und verbrauchte kein Gemini- oder Fish-Kontingent. Der ausführliche Nachweis steht in `STEP07_PREDEPLOY_TEST_REPORT.md`.
+- Echte iPhone-Mikrofonaufnahme, Gemini-Transkription, Fish-Wiedergabe, Render-Neustart, Neon und PWA-Aktualisierung können technisch erst nach der Veröffentlichung in Schritt 08 geprüft werden. Schritt 07 bestätigt daher den veröffentlichungsreifen lokalen Stand.
