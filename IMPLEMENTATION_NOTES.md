@@ -112,3 +112,12 @@ werden. Dann beantwortet der Bot keine fremden Nutzer.
 - Quellen erscheinen getrennt unter der Antwort und werden nicht von Fish vorgelesen. Die Sprachbalken folgen während der Wiedergabe soweit vom Gerät unterstützt dem tatsächlichen Audiopegel.
 - Der komplette Textweg wurde lokal im iPhone-Format mit Gerätefreigabe, neu geladener Unterhaltung und einer simulierten JARVIS-Antwort getestet. Die Audio- und Datei-Endpunkte wurden ohne externe API-Kosten automatisiert geprüft.
 - Echte Mikrofonberechtigung, echte Gemini-Dateianalyse und Fish-Wiedergabe auf dem iPhone bleiben Teil des späteren Produktions-Endtests. Dieser Stand ist weiterhin nicht veröffentlicht.
+
+## Systemseite mit echten Werten – Schritt 05
+
+- Die Systemseite enthält keine Beispielwerte mehr. Der Gesamtzustand wird aus vier tatsächlich vorhandenen Voraussetzungen berechnet: erreichbarer JARVIS-Webdienst, dauerhaftes Neon-Memory, eingerichteter Gemini-Zugang und eingerichteter Fish-Audio-Zugang.
+- Ein erreichbarer Status-Endpunkt beweist Render/JARVIS selbst. Memory meldet entweder dauerhaftes Neon oder ehrlich die RAM-Reserve. Gemini und Fish werden ohne kostenpflichtigen Testaufruf anhand ihrer aktiven, beim Start zwingend geprüften Konfiguration angezeigt.
+- Die letzten acht wichtigen Dashboard-Vorgänge werden nur im laufenden JARVIS-Prozess gehalten. Nachrichteninhalte, Zugangsschlüssel und andere Geheimnisse werden dort nicht gespeichert oder ausgegeben.
+- Schlägt ein Dienst oder die Dashboard-Verbindung fehl, wechselt die Anzeige auf Gelb beziehungsweise Rot und nennt die Einschränkung in einfacher Sprache. Die Systemseite aktualisiert sich bei sichtbarer App alle 30 Sekunden; dabei wird nur der eigene Render-Status abgefragt.
+- Die mobile Ansicht wurde mit 390 × 844 Pixeln geprüft: alle vier echten Dienstzustände und Meldungen sind sichtbar, es gibt keinen horizontalen Überlauf und keine Browserwarnungen. Für diese Prüfung wurden weder Gemini- noch Fish-Anfragen verbraucht.
+- Dieser Stand ist weiterhin nur lokal gespeichert und noch nicht zu GitHub oder Render veröffentlicht.

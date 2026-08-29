@@ -1054,7 +1054,21 @@ async def handle_update(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         await process_text(update, transcript)
 
 
-def dashboard_status() -> dict:
+def dashboard_status(
+    dashboard_sessions: DashboardSessionStore | None = None,
+    dashboard_owner_id: int | None = None,
+) -> dict:
+    memory_ready = memory_store.persistent and (
+        dashboard_sessions is None or dashboard_sessions.database_ready
+    )
+    gemini_ready = gemini_client is not None
+    fish_ready = bool(FISH_API_KEY and FISH_VOICE_ID)
+    device_ready = dashboard_owner_id is not None or (
+        dashboard_owner_id is None and dashboard_sessions is None
+    )
+    readiness = [True, memory_ready, gemini_ready, fish_ready]
+    score = round(sum(readiness) / len(readiness) * 100)
+    degraded = score < 100
     return {
         "online": True,
         "dashboard_api": "v2",
@@ -1064,6 +1078,42 @@ def dashboard_status() -> dict:
         "voice_output": "available",
         "voice_input": "telegram+dashboard",
         "file_input": "available",
+        "health": {
+            "score": score,
+            "state": "degraded" if degraded else "ready",
+            "title": "EINGESCHRÄNKT BEREIT" if degraded else "ALLE SYSTEME BEREIT",
+            "detail": (
+                "Mindestens ein Dienst arbeitet nur eingeschränkt."
+                if degraded
+                else "Alle notwendigen Verbindungen sind eingerichtet."
+            ),
+        },
+        "services": {
+            "render": {
+                "state": "ready",
+                "label": "ONLINE",
+                "detail": "Antwortweg erreichbar",
+            },
+            "memory": {
+                "state": "ready" if memory_ready else "warning",
+                "label": "VERBUNDEN" if memory_ready else "RAM-RESERVE",
+                "detail": "dauerhaft in Neon" if memory_ready else "nur bis zum Neustart",
+            },
+            "gemini": {
+                "state": "ready" if gemini_ready else "error",
+                "label": "BEREIT" if gemini_ready else "FEHLT",
+                "detail": GEMINI_MODEL if gemini_ready else "API-Zugang fehlt",
+            },
+            "fish": {
+                "state": "ready" if fish_ready else "error",
+                "label": "BEREIT" if fish_ready else "FEHLT",
+                "detail": "Sprachausgabe eingerichtet" if fish_ready else "API-Zugang fehlt",
+            },
+            "device": {
+                "state": "ready" if device_ready else "error",
+                "label": "FREIGEGEBEN" if device_ready else "GESPERRT",
+            },
+        },
     }
 
 
@@ -1130,8 +1180,17 @@ def main() -> None:
         process_text=process_user_text,
         transcribe_audio=dashboard_transcribe_audio,
         synthesize_speech=dashboard_synthesize_speech,
-        status=dashboard_status,
+        status=lambda: dashboard_status(dashboard_sessions, dashboard_owner_id),
     )
+    dashboard_context.record_event("info", "JARVIS-Dienst gestartet")
+    dashboard_context.record_event(
+        "ok" if memory_store.persistent and dashboard_sessions.database_ready else "warning",
+        "Neon-Memory verbunden"
+        if memory_store.persistent and dashboard_sessions.database_ready
+        else "Memory läuft in der RAM-Reserve",
+    )
+    dashboard_context.record_event("ok", "Gemini ist eingerichtet")
+    dashboard_context.record_event("ok", "Fish Audio ist eingerichtet")
     asyncio.run(
         run_dashboard_server(
             context=dashboard_context,

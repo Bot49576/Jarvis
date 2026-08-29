@@ -21,6 +21,13 @@ const chatAttachButton = document.querySelector('#attach-button');
 const chatFileInput = document.querySelector('#file-input');
 const fileState = document.querySelector('#file-state');
 const installButton = document.querySelector('#install-button');
+const healthPanel = document.querySelector('#health-panel');
+const healthValue = document.querySelector('#health-value');
+const healthTitle = document.querySelector('#health-title');
+const healthCopy = document.querySelector('#health-copy');
+const eventsMode = document.querySelector('#events-mode');
+const eventsList = document.querySelector('#events-list');
+const errorPanel = document.querySelector('#error-panel');
 const pairingResultPromise = Promise.resolve(consumePairingTokenFromFragment());
 const dashboardClient = new DashboardClient();
 const localPreview = isLocalPreview();
@@ -48,6 +55,7 @@ let recordingTimer = null;
 let activeAudio = null;
 let outputAudioContext = null;
 let outputFrame = null;
+let statusTimer = null;
 
 function showPage(nextPage) {
   page = Math.max(0, Math.min(2, nextPage));
@@ -68,6 +76,94 @@ track.addEventListener('pointercancel', () => { pointerStart = null; });
 
 function currentTime() {
   return new Intl.DateTimeFormat('de-AT', { hour: '2-digit', minute: '2-digit' }).format(new Date());
+}
+
+function serviceCard(name) {
+  return document.querySelector(`[data-service="${name}"]`);
+}
+
+function renderService(name, service) {
+  const card = serviceCard(name);
+  if (!card || !service) return;
+  const indicator = card.querySelector('i');
+  const label = card.querySelector('strong');
+  const detail = card.querySelector('small');
+  indicator.className = service.state === 'ready' ? 'ok' : service.state === 'warning' ? 'warn' : 'bad';
+  label.textContent = service.label || 'UNBEKANNT';
+  detail.textContent = service.detail || 'Kein Detail verfügbar';
+}
+
+function renderEvents(events = []) {
+  eventsList.replaceChildren();
+  const visibleEvents = events.slice(0, 5);
+  if (!visibleEvents.length) {
+    const row = document.createElement('p');
+    const time = document.createElement('time');
+    const message = document.createElement('span');
+    time.textContent = currentTime();
+    message.textContent = 'Systemstatus erfolgreich geladen.';
+    row.append(time, message);
+    eventsList.append(row);
+    return;
+  }
+  visibleEvents.forEach((event) => {
+    const row = document.createElement('p');
+    row.dataset.level = event.level || 'info';
+    const time = document.createElement('time');
+    const message = document.createElement('span');
+    time.textContent = event.time || '--:--';
+    message.textContent = event.message || 'Statusmeldung';
+    row.append(time, message);
+    eventsList.append(row);
+  });
+}
+
+function renderSystemStatus(status) {
+  const health = status.health || {};
+  const services = status.services || {};
+  const score = Number.isFinite(Number(health.score)) ? Math.max(0, Math.min(100, Number(health.score))) : 0;
+  healthValue.textContent = String(Math.round(score));
+  healthTitle.textContent = health.title || (status.online ? 'SYSTEM ERREICHBAR' : 'SYSTEM OFFLINE');
+  healthCopy.textContent = health.detail || 'Der aktuelle Zustand wurde geladen.';
+  healthPanel.dataset.state = health.state || (score === 100 ? 'ready' : 'degraded');
+  renderService('render', services.render);
+  renderService('memory', services.memory);
+  renderService('gemini', services.gemini);
+  renderService('fish', services.fish);
+  renderEvents(status.events);
+
+  const problems = Object.values(services).filter((service) => service?.state && service.state !== 'ready');
+  eventsMode.textContent = problems.length ? 'EINGESCHRÄNKT' : 'LIVE';
+  errorPanel.className = problems.length ? 'error-clear warning' : 'error-clear';
+  errorPanel.querySelector('i').textContent = problems.length ? '!' : '✓';
+  errorPanel.querySelector('strong').textContent = problems.length ? 'EINSCHRÄNKUNG ERKANNT' : 'KEINE KRITISCHEN FEHLER';
+  errorPanel.querySelector('span').textContent = problems.length
+    ? problems.map((service) => `${service.label}: ${service.detail || 'Prüfung nötig'}`).join(' · ')
+    : 'Alle notwendigen JARVIS-Dienste sind eingerichtet.';
+}
+
+function renderSystemUnavailable() {
+  healthValue.textContent = '0';
+  healthTitle.textContent = 'JARVIS NICHT ERREICHBAR';
+  healthCopy.textContent = 'Die Verbindung zum JARVIS-Dienst ist unterbrochen.';
+  healthPanel.dataset.state = 'error';
+  ['render', 'memory', 'gemini', 'fish'].forEach((name) => renderService(name, {
+    state: 'error', label: 'NICHT ERREICHBAR', detail: 'Verbindung unterbrochen',
+  }));
+  eventsMode.textContent = 'OFFLINE';
+  errorPanel.className = 'error-clear error';
+  errorPanel.querySelector('i').textContent = '!';
+  errorPanel.querySelector('strong').textContent = 'VERBINDUNG UNTERBROCHEN';
+  errorPanel.querySelector('span').textContent = 'Bitte Internetverbindung oder Render-Dienst prüfen.';
+}
+
+async function refreshSystemStatus() {
+  if (!connected || document.hidden) return;
+  try {
+    renderSystemStatus(await dashboardClient.status());
+  } catch {
+    renderSystemUnavailable();
+  }
 }
 
 function appendMessage(role, text, { sources = [], files = [] } = {}) {
@@ -142,7 +238,8 @@ async function connectDashboard() {
     return;
   }
   try {
-    await dashboardClient.status();
+    const status = await dashboardClient.status();
+    renderSystemStatus(status);
     const payload = await dashboardClient.sessions();
     sessions.replaceChildren(...payload.sessions.map(
       (session) => new Option(session.title, session.session_id),
@@ -151,8 +248,11 @@ async function connectDashboard() {
     connected = true;
     chatStatus.textContent = 'MEMORY AKTIV';
     visualizer.setState('ready', pairingResult === 'paired' ? '◉  GERÄT VERBUNDEN' : '');
+    clearInterval(statusTimer);
+    statusTimer = setInterval(refreshSystemStatus, 30_000);
   } catch (error) {
     connected = false;
+    renderSystemUnavailable();
     if (localPreview) {
       chatStatus.textContent = 'LOKALE ANSICHT';
       visualizer.setState('ready');
@@ -466,10 +566,15 @@ connectDashboard();
 if ('serviceWorker' in navigator) window.addEventListener('load', () => navigator.serviceWorker.register('./sw.js'));
 window.addEventListener('offline', () => {
   connected = false;
+  renderSystemUnavailable();
   visualizer.setState('offline');
+});
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden) refreshSystemStatus();
 });
 window.addEventListener('online', connectDashboard);
 window.addEventListener('pagehide', () => {
+  clearInterval(statusTimer);
   if (mediaRecorder) stopRecording(false);
   else if (microphoneStream) releaseMicrophone();
   stopOutputAudio();

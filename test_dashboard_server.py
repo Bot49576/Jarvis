@@ -35,6 +35,25 @@ class DashboardSecurityTests(unittest.TestCase):
         self.assertEqual(len(store.get(123, second["session_id"])["messages"]), 2)
         self.assertIsNone(store.get(124, second["session_id"]))
 
+    def test_dashboard_events_are_bounded_and_whitespace_is_cleaned(self):
+        context = DashboardContext(
+            telegram_application=SimpleNamespace(),
+            telegram_token="token",
+            telegram_webhook_secret="secret",
+            owner_id=123,
+            allowed_origin="https://jarvis.example",
+            session_store=DashboardSessionStore(""),
+            process_text=None,
+            transcribe_audio=None,
+            synthesize_speech=None,
+            status=lambda: {},
+        )
+        for number in range(10):
+            context.record_event("ok", f"  Meldung   {number}  ")
+        self.assertEqual(len(context.events), 8)
+        self.assertEqual(context.events[0]["message"], "Meldung 9")
+        self.assertEqual(context.events[-1]["message"], "Meldung 2")
+
 
 class SharedProcessingTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
@@ -201,6 +220,34 @@ class DashboardHttpTests(AsyncHTTPTestCase):
         status = self.fetch("/api/dashboard/status", headers=self.auth_headers())
         self.assertEqual(status.code, 200)
         self.assertEqual(self.decode(status)["memory"], "neon")
+        self.assertIn("events", self.decode(status))
+
+    def test_live_status_has_honest_service_readiness_without_external_calls(self):
+        sessions = SimpleNamespace(database_ready=True)
+        with (
+            patch.object(bot, "memory_store", SimpleNamespace(persistent=True)),
+            patch.object(bot, "gemini_client", object()),
+            patch.object(bot, "FISH_API_KEY", "fish-key"),
+            patch.object(bot, "FISH_VOICE_ID", "voice-id"),
+        ):
+            status = bot.dashboard_status(sessions, self.owner_id)
+        self.assertEqual(status["health"]["score"], 100)
+        self.assertEqual(status["services"]["memory"]["label"], "VERBUNDEN")
+        self.assertEqual(status["services"]["gemini"]["label"], "BEREIT")
+        self.assertEqual(status["services"]["fish"]["label"], "BEREIT")
+
+    def test_live_status_reports_ram_fallback_as_degraded(self):
+        sessions = SimpleNamespace(database_ready=False)
+        with (
+            patch.object(bot, "memory_store", SimpleNamespace(persistent=False)),
+            patch.object(bot, "gemini_client", object()),
+            patch.object(bot, "FISH_API_KEY", "fish-key"),
+            patch.object(bot, "FISH_VOICE_ID", "voice-id"),
+        ):
+            status = bot.dashboard_status(sessions, self.owner_id)
+        self.assertEqual(status["health"]["score"], 75)
+        self.assertEqual(status["health"]["state"], "degraded")
+        self.assertEqual(status["services"]["memory"]["label"], "RAM-RESERVE")
 
     def test_foreign_browser_origin_is_rejected(self):
         response = self.fetch(
@@ -361,6 +408,19 @@ class DashboardHttpTests(AsyncHTTPTestCase):
         self.assertIn("/api/dashboard/transcribe", client_source)
         self.assertIn("/api/dashboard/speech", client_source)
         self.assertIn("new FormData()", client_source)
+
+    def test_system_page_renders_and_refreshes_live_status(self):
+        app_source = (Path(__file__).parent / "dashboard" / "app.js").read_text(
+            encoding="utf-8"
+        )
+        html_source = (Path(__file__).parent / "dashboard" / "index.html").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("function renderSystemStatus(status)", app_source)
+        self.assertIn("setInterval(refreshSystemStatus, 30_000)", app_source)
+        self.assertIn("document.hidden", app_source)
+        self.assertIn('id="health-value">--', html_source)
+        self.assertNotIn("Recherche abgeschlossen", html_source)
 
     def test_pairing_fragment_is_consumed_only_in_the_browser(self):
         source = (Path(__file__).parent / "dashboard" / "api-client.js").read_text(

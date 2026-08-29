@@ -51,15 +51,15 @@
 
         <section class="screen system" aria-label="JARVIS Systemseite">
           <div class="page-title"><div><small>SEITE 03</small><h1>SYSTEMSTATUS</h1></div><span class="shield">◆ SICHER</span></div>
-          <div class="health"><div class="health-ring"><strong id="health-value">100</strong><small>%</small></div><div><small>GESAMTZUSTAND</small><h2 id="health-title">ALLE SYSTEME BEREIT</h2><p id="health-copy">Keine schweren Fehler erkannt.</p></div></div>
+          <div class="health" id="health-panel"><div class="health-ring"><strong id="health-value">--</strong><small>%</small></div><div><small>GESAMTZUSTAND</small><h2 id="health-title">STATUS WIRD GELADEN</h2><p id="health-copy">JARVIS prüft die eigenen Verbindungen.</p></div></div>
           <div class="services">
-            <article><i class="ok"></i><span>JARVIS / RENDER</span><strong id="render-status">ONLINE</strong><small>Antwortweg bereit</small></article>
-            <article><i class="ok"></i><span>MEMORY / NEON</span><strong id="memory-status">VERBUNDEN</strong><small>dauerhaft gespeichert</small></article>
-            <article><i class="ok"></i><span>GEMINI</span><strong id="gemini-status">BEREIT</strong><small>Denken + Spracheingabe</small></article>
-            <article><i class="ok"></i><span>FISH AUDIO</span><strong id="fish-status">BEREIT</strong><small>Sprachausgabe aktiv</small></article>
+            <article data-service="render"><i></i><span>JARVIS / RENDER</span><strong id="render-status">PRÜFUNG</strong><small>Verbindung wird geprüft</small></article>
+            <article data-service="memory"><i></i><span>MEMORY / NEON</span><strong id="memory-status">PRÜFUNG</strong><small>Speicher wird geprüft</small></article>
+            <article data-service="gemini"><i></i><span>GEMINI</span><strong id="gemini-status">PRÜFUNG</strong><small>Zugang wird geprüft</small></article>
+            <article data-service="fish"><i></i><span>FISH AUDIO</span><strong id="fish-status">PRÜFUNG</strong><small>Zugang wird geprüft</small></article>
           </div>
-          <div class="events"><div class="section-head"><span>LETZTE MELDUNGEN</span><b id="events-mode">LIVE</b></div><div id="events-list"><p><time>14:20</time><span>Recherche abgeschlossen</span></p><p><time>14:18</time><span>Memory sicher synchronisiert</span></p><p><time>14:16</time><span>iPhone-Gerät verbunden</span></p><p><time>14:15</time><span>JARVIS-Dienst gestartet</span></p></div></div>
-          <div class="error-clear" id="error-panel"><i>✓</i><div><strong>KEINE KRITISCHEN FEHLER</strong><span>Bei einem schweren Fehler nennt JARVIS die Ursache hier verständlich.</span></div></div>
+          <div class="events"><div class="section-head"><span>LETZTE MELDUNGEN</span><b id="events-mode">PRÜFUNG</b></div><div id="events-list"><p><time>--:--</time><span>Noch keine Live-Meldungen geladen.</span></p></div></div>
+          <div class="error-clear checking" id="error-panel"><i>…</i><div><strong>STATUS WIRD GEPRÜFT</strong><span>Schwere Fehler werden hier verständlich angezeigt.</span></div></div>
         </section>
       </div>
     </div>

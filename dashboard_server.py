@@ -4,7 +4,8 @@ import hmac
 import json
 import signal
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 from typing import Awaitable, Callable
 
@@ -235,6 +236,19 @@ class DashboardContext:
     transcribe_audio: Callable[[bytes, str], Awaitable[str | None]]
     synthesize_speech: Callable[[str], Awaitable[bytes | None]]
     status: Callable[[], dict]
+    events: list[dict] = field(default_factory=list)
+
+    def record_event(self, level: str, message: str) -> None:
+        safe_level = level if level in {"ok", "info", "warning", "error"} else "info"
+        self.events.insert(
+            0,
+            {
+                "time": datetime.now().strftime("%H:%M"),
+                "level": safe_level,
+                "message": " ".join(str(message).split())[:120],
+            },
+        )
+        del self.events[8:]
 
 
 class JsonHandler(tornado.web.RequestHandler):
@@ -248,6 +262,9 @@ class JsonHandler(tornado.web.RequestHandler):
         self.set_header("Referrer-Policy", "no-referrer")
 
     def write_json(self, payload: dict, status: int = 200) -> None:
+        if status >= 400 and status not in {401, 403, 404} and payload.get("error"):
+            level = "error" if status >= 500 else "warning"
+            self.context.record_event(level, str(payload["error"]))
         self.set_status(status)
         self.set_header("Content-Type", "application/json; charset=utf-8")
         self.finish(json.dumps(payload, ensure_ascii=False))
@@ -319,6 +336,7 @@ class DashboardPairHandler(JsonHandler):
             self.write_json({"error": "Gerätecode ungültig."}, 401)
             return
         self.set_device_cookie(expected)
+        self.context.record_event("ok", "Gerät sicher freigegeben")
         self.write_json({"paired": True})
 
 
@@ -342,7 +360,9 @@ class DashboardStatusHandler(JsonHandler):
     async def get(self) -> None:
         if not self.require_auth():
             return
-        self.write_json(self.context.status())
+        payload = dict(self.context.status())
+        payload["events"] = list(self.context.events)
+        self.write_json(payload)
 
 
 class DashboardSessionsHandler(JsonHandler):
@@ -477,6 +497,7 @@ class DashboardChatHandler(JsonHandler):
         except ValueError as error:
             self.write_json({"error": str(error)}, 400)
             return
+        self.context.record_event("ok", "JARVIS-Antwort bereit")
         self.write_json(
             {
                 "text": reply.text,
@@ -512,6 +533,7 @@ class DashboardTranscribeHandler(JsonHandler):
                 {"error": "Ich konnte die Aufnahme nicht sicher verstehen."}, 422
             )
             return
+        self.context.record_event("ok", "Spracheingabe verstanden")
         self.write_json({"text": transcript})
 
 
@@ -531,6 +553,7 @@ class DashboardSpeechHandler(JsonHandler):
         if not audio_data:
             self.write_json({"error": "Sprachausgabe ist gerade nicht verfügbar."}, 502)
             return
+        self.context.record_event("ok", "Fish-Sprachausgabe bereit")
         self.set_header("Content-Type", "audio/mpeg")
         self.set_header("Content-Disposition", 'inline; filename="jarvis.mp3"')
         self.finish(audio_data)
